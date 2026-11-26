@@ -1,0 +1,17 @@
+.DS_Store
+.env*
+!.env.example
+node_modules/
+.expo/
+dist/
+build/
+coverage/
+*.log
+*.sqlite*
+*.db*
+*.m4a
+*.wav
+*.p12
+*.mobileprovision
+.worktrees/
+scratch/
