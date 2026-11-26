@@ -1,0 +1,11 @@
+{
+  "expo": {
+    "name": "Recall for Interviews",
+    "slug": "recall-for-interviews",
+    "version": "0.1.0",
+    "userInterfaceStyle": "automatic",
+    "ios": { "bundleIdentifier": "com.mruniverse.recallinterviews" },
+    "android": { "package": "com.mruniverse.recallinterviews" },
+    "plugins": ["expo-sqlite"]
+  }
+}
