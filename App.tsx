@@ -5,7 +5,7 @@ import { openDatabaseAsync } from 'expo-sqlite';
 import { Storage as preferences } from 'expo-sqlite/kv-store';
 import fixtureDeck from './src/content/fixtures/deck.json';
 import { localizeFixtureCard } from './src/content/fixture-locales';
-import { openStorage } from './src/storage/storage.ts';
+import { NEW_CARD_LIMITS, openStorage, type NewCardLimit } from './src/storage/storage.ts';
 import { deckTopics, parseFixtureDeck, textIn } from './src/study/content.ts';
 import { createStudy, type Notice, type Session, type StudyController, type StudyState } from './src/study/controller.ts';
 import { COPY, formatDueDate, LOCALE_NAMES, LOCALES, type Copy, type StudyLocale } from './src/study/copy.ts';
@@ -81,7 +81,7 @@ function Screen({ state }: { state: StudyState }) {
         </>
       );
     case 'onboarding':
-      return <Onboarding notice={state.notice} />;
+      return <Onboarding notice={state.notice} newCardLimit={state.today.newCardLimit} />;
     case 'today':
       return <Today state={state} />;
     case 'study':
@@ -91,7 +91,7 @@ function Screen({ state }: { state: StudyState }) {
   }
 }
 
-function Onboarding({ notice }: { notice: Notice | null }) {
+function Onboarding({ notice, newCardLimit }: { notice: Notice | null; newCardLimit: NewCardLimit }) {
   const copy = useCopy();
   const study = useStudy();
   return (
@@ -103,7 +103,7 @@ function Onboarding({ notice }: { notice: Notice | null }) {
         <Body key={topic}>• {copy.topics[topic]}</Body>
       ))}
       <Heading>{copy.rulesHeading}</Heading>
-      {copy.rules.map((rule) => (
+      {copy.rules(newCardLimit).map((rule) => (
         <Body key={rule}>• {rule}</Body>
       ))}
       <LanguagePicker />
@@ -117,6 +117,7 @@ function Today({ state }: { state: Extract<StudyState, { screen: 'today' }> }) {
   const copy = useCopy();
   const study = useStudy();
   const { today, starting } = state;
+  const busy = starting || state.savingLimit;
   return (
     <>
       <Title>{copy.todayTitle}</Title>
@@ -137,13 +138,15 @@ function Today({ state }: { state: Extract<StudyState, { screen: 'today' }> }) {
       )}
       {today.status === 'ready' && (
         <>
-          <Body>{copy.rules[3]}</Body>
-          <Action title={copy.startReview} disabled={starting} onPress={() => void study.start()} />
+          <Body>{copy.draftsRule}</Body>
+          <Action title={copy.startReview} disabled={busy} onPress={() => void study.start()} />
           {starting && <Body>{copy.starting}</Body>}
         </>
       )}
-      <LanguagePicker disabled={starting} />
-      <Action title={copy.howItWorks} disabled={starting} onPress={() => study.showOnboarding()} />
+      <Heading>{copy.settings}</Heading>
+      <LanguagePicker disabled={busy} />
+      <NewCardLimitPicker current={today.newCardLimit} disabled={busy} />
+      <Action title={copy.howItWorks} disabled={busy} onPress={() => study.showOnboarding()} />
     </>
   );
 }
@@ -376,6 +379,35 @@ function LanguagePicker({ disabled = false }: { disabled?: boolean }) {
             {locale === current ? '● ' : '○ '}
             {LOCALE_NAMES[locale]}
           </Text>
+        </Pressable>
+      ))}
+    </View>
+  );
+}
+
+function NewCardLimitPicker({ current, disabled }: { current: NewCardLimit; disabled: boolean }) {
+  const copy = useCopy();
+  const lang = useContext(Lang);
+  const study = useStudy();
+  return (
+    <View accessibilityRole="radiogroup" accessibilityLabel={copy.newCardLimit} accessibilityLanguage={lang}>
+      <Heading>{copy.newCardLimit}</Heading>
+      <Body>{copy.newCardLimitHelp}</Body>
+      {NEW_CARD_LIMITS.map((limit) => (
+        <Pressable
+          key={limit}
+          accessibilityRole="radio"
+          accessibilityLabel={copy.newCardLimitOption(limit)}
+          accessibilityState={{ checked: limit === current, disabled }}
+          accessibilityLanguage={lang}
+          disabled={disabled}
+          onPress={() => void study.chooseNewCardLimit(limit)}
+          style={{ padding: 8 }}
+        >
+          <Body>
+            {limit === current ? '● ' : '○ '}
+            {copy.newCardLimitOption(limit)}
+          </Body>
         </Pressable>
       ))}
     </View>

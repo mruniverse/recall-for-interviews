@@ -2,7 +2,6 @@
 // screen follows the chosen locale, card content included, with no fallback to the other one.
 import type { Topic } from '../content/deck.ts';
 import type { Rating } from '../scheduler/schedule.ts';
-import { NEW_CARDS_PER_DAY } from '../storage/storage.ts';
 
 export const LOCALES = ['en', 'pt-BR'] as const;
 export type StudyLocale = (typeof LOCALES)[number];
@@ -46,6 +45,14 @@ export function formatDueDate(dueDate: string, today: string, locale: StudyLocal
   return `${locale === 'en' ? en : pt} (${date})`;
 }
 
+const enNewQuestions = (n: number) => `${n} new ${n === 1 ? 'question' : 'questions'}`;
+const ptNewQuestions = (n: number) => `${n} ${n === 1 ? 'pergunta nova' : 'perguntas novas'}`;
+
+const enDraftsRule =
+  'Drafts are not saved. If you leave the session or close the app, the current question and your draft are discarded; rated answers stay saved.';
+const ptDraftsRule =
+  'Rascunhos não são salvos. Se você sair da sessão ou fechar o app, a pergunta atual e o rascunho são descartados; respostas avaliadas continuam salvas.';
+
 const en = {
   appName: 'Recall for Interviews',
   prototypeLabel: 'Low-fidelity prototype · sample fixture deck, not reviewed · not a released app',
@@ -58,13 +65,14 @@ const en = {
     'Answer each question before you see the explanation. How you rate your answer decides when the question comes back.',
   topicsHeading: 'Topics',
   rulesHeading: 'How reviews work',
-  rules: [
+  rules: (newCardLimit: number) => [
     'Correct (every required point covered): back in 7 days, then in 30 days.',
     'Partial or missed: back tomorrow.',
-    `Up to ${NEW_CARDS_PER_DAY} new questions per day.`,
-    'Drafts are not saved. If you leave the session or close the app, the current question and your draft are discarded; rated answers stay saved.',
+    `Up to ${enNewQuestions(newCardLimit)} per day; you can change this in Settings. Due reviews are never limited and always appear.`,
+    enDraftsRule,
     'Questions, reference answers and explanations are shown in the language you choose.',
   ],
+  draftsRule: enDraftsRule,
   continue: 'Continue',
   todayTitle: 'Today',
   track: 'Track: Software Engineering',
@@ -77,11 +85,17 @@ const en = {
   nextReview: (date: string) => `Next review: ${date}`,
   noReviewScheduled: 'No review is scheduled yet.',
   howItWorks: 'How it works',
+  settings: 'Settings',
+  newCardLimit: 'New questions per day',
+  newCardLimitHelp:
+    'New questions you already answered today count toward this limit, so lowering it can leave none until tomorrow. Due reviews are never limited.',
+  newCardLimitOption: (n: number) => `${enNewQuestions(n)} per day`,
   notices: {
     stale: 'This question changed since the session started. Nothing was saved for it, and the queue was refreshed.',
     'locale-unavailable': 'The questions are not available in that language yet. The language did not change.',
     'locale-not-saved': 'The language could not be saved on this device; it applies until the app closes.',
     'load-failed': 'The queue could not be loaded. Try again.',
+    'limit-not-saved': 'The daily limit could not be saved, so it did not change. Try again.',
   },
   progress: (position: number, total: number) => `Question ${position} of ${total}`,
   kind: { due: 'Review', new: 'New' },
@@ -149,13 +163,14 @@ const ptBR: Copy = {
     'Responda cada pergunta antes de ver a explicação. A avaliação que você der à sua resposta decide quando a pergunta volta.',
   topicsHeading: 'Temas',
   rulesHeading: 'Como funcionam as revisões',
-  rules: [
+  rules: (newCardLimit) => [
     'Acertou (cobriu todos os pontos obrigatórios): volta em 7 dias, depois em 30 dias.',
     'Parcial ou não acertou: volta amanhã.',
-    `Até ${NEW_CARDS_PER_DAY} perguntas novas por dia.`,
-    'Rascunhos não são salvos. Se você sair da sessão ou fechar o app, a pergunta atual e o rascunho são descartados; respostas avaliadas continuam salvas.',
+    `Até ${ptNewQuestions(newCardLimit)} por dia; você pode mudar isso em Configurações. Revisões pendentes nunca são limitadas e sempre aparecem.`,
+    ptDraftsRule,
     'Perguntas, respostas de referência e explicações aparecem no idioma escolhido.',
   ],
+  draftsRule: ptDraftsRule,
   continue: 'Continuar',
   todayTitle: 'Hoje',
   track: 'Trilha: Engenharia de Software',
@@ -168,11 +183,17 @@ const ptBR: Copy = {
   nextReview: (date) => `Próxima revisão: ${date}`,
   noReviewScheduled: 'Nenhuma revisão agendada ainda.',
   howItWorks: 'Como funciona',
+  settings: 'Configurações',
+  newCardLimit: 'Perguntas novas por dia',
+  newCardLimitHelp:
+    'Perguntas novas que você já respondeu hoje contam para este limite; por isso, ao reduzi-lo, pode não sobrar nenhuma até amanhã. Revisões pendentes nunca são limitadas.',
+  newCardLimitOption: (n) => `${ptNewQuestions(n)} por dia`,
   notices: {
     stale: 'Esta pergunta mudou desde o início da sessão. Nada foi salvo para ela, e a fila foi atualizada.',
     'locale-unavailable': 'As perguntas ainda não estão disponíveis nesse idioma. O idioma não mudou.',
     'locale-not-saved': 'Não foi possível salvar o idioma neste aparelho; ele vale até o app ser fechado.',
     'load-failed': 'Não foi possível carregar a fila. Tente de novo.',
+    'limit-not-saved': 'Não foi possível salvar o limite diário, então ele não mudou. Tente de novo.',
   },
   progress: (position, total) => `Pergunta ${position} de ${total}`,
   kind: { due: 'Revisão', new: 'Nova' },

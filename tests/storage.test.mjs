@@ -4,9 +4,11 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
+import { MIGRATIONS } from '../src/storage/schema.ts';
 import {
+  DEFAULT_NEW_CARD_LIMIT,
   MAX_LOCK_RETRIES,
-  NEW_CARDS_PER_DAY,
+  NEW_CARD_LIMITS,
   StorageBusyError,
   localCivilDate,
   openStorage,
@@ -86,18 +88,22 @@ function inspect(file, sql) {
   }
 }
 
-const today = (storage, cardIds, now, timeZone = NY, deckId = DECK) =>
-  storage.loadToday({ deckId, cardIds, now: new Date(now), timeZone });
+// Storage has no implicit limit: the app passes the stored preference. Five keeps queue tests readable.
+const today = (storage, cardIds, now, { timeZone = NY, deckId = DECK, newCardLimit = 5 } = {}) =>
+  storage.loadToday({ deckId, cardIds, now: new Date(now), timeZone, newCardLimit });
+
+const INVALID_LIMITS = [0, 2, 4, 11, -1, 5.5, NaN, Infinity, '5', null, undefined];
 
 test('migrates an empty database forward once and keeps progress across relaunch', async (t) => {
   const env = setup(t);
   const first = await env.open();
-  assert.deepEqual(inspect(env.file, 'PRAGMA user_version'), [{ user_version: 1 }]);
+  assert.equal(MIGRATIONS.length, 2);
+  assert.deepEqual(inspect(env.file, 'PRAGMA user_version'), [{ user_version: 2 }]);
   const { attempt: saved } = await first.commitAttempt(attempt());
   await first.close();
 
   const relaunched = await env.open();
-  assert.deepEqual(inspect(env.file, 'PRAGMA user_version'), [{ user_version: 1 }]);
+  assert.deepEqual(inspect(env.file, 'PRAGMA user_version'), [{ user_version: 2 }]);
   assert.deepEqual(await today(relaunched, ['l7-vs-l4'], '2026-11-27T15:00:00Z'), {
     today: '2026-11-27',
     due: [],
@@ -110,10 +116,10 @@ test('migrates an empty database forward once and keeps progress across relaunch
 test('refuses a database from a newer schema without touching it', async (t) => {
   const env = setup(t);
   const newer = new DatabaseSync(env.file);
-  newer.exec('PRAGMA user_version = 2');
+  newer.exec(`PRAGMA user_version = ${MIGRATIONS.length + 1}`);
   newer.close();
   await assert.rejects(env.open(), /newer than this app/);
-  assert.deepEqual(inspect(env.file, 'PRAGMA user_version'), [{ user_version: 2 }]);
+  assert.deepEqual(inspect(env.file, 'PRAGMA user_version'), [{ user_version: MIGRATIONS.length + 1 }]);
   assert.deepEqual(inspect(env.file, "SELECT name FROM sqlite_master WHERE type = 'table'"), []);
 });
 
@@ -127,6 +133,47 @@ test('rolls back a failed migration without bumping the schema version', async (
   assert.deepEqual(inspect(env.file, "SELECT name FROM sqlite_master WHERE type = 'table'"), [
     { name: 'review_attempt' },
   ]);
+});
+
+// A database as the previous release left it: schema 1, with progress and history.
+function schemaOneDatabase(file) {
+  const db = new DatabaseSync(file);
+  db.exec(MIGRATIONS[0]);
+  db.exec(`INSERT INTO card_progress VALUES ('${DECK}', 'c01', 1, 1, '2026-12-03');
+    INSERT INTO review_attempt VALUES ('old', '${DECK}', 'c01', 3, 'correct', '2026-11-26T15:00:00.000Z',
+      '${NY}', '2026-11-26', 7, 1, '2026-12-03', 1);
+    PRAGMA user_version = 1;`);
+  db.close();
+}
+
+test('upgrades a schema-1 database in place: history kept, daily limit defaults to one', async (t) => {
+  const env = setup(t);
+  schemaOneDatabase(env.file);
+  const before = inspect(env.file, 'SELECT * FROM review_attempt');
+  const storage = await env.open();
+  assert.deepEqual(inspect(env.file, 'PRAGMA user_version'), [{ user_version: 2 }]);
+  assert.deepEqual(inspect(env.file, 'SELECT * FROM review_attempt'), before);
+  assert.deepEqual(inspect(env.file, 'SELECT * FROM study_preference'), []);
+  assert.equal(DEFAULT_NEW_CARD_LIMIT, 1);
+  assert.equal(await storage.loadNewCardLimit(), 1);
+  assert.deepEqual(await today(storage, ['c01', 'c02'], '2026-11-27T15:00:00Z', { newCardLimit: 1 }), {
+    today: '2026-11-27',
+    due: [],
+    new: [{ cardId: 'c02', revision: 0 }],
+    nextDueDate: '2026-12-03',
+  });
+});
+
+test('rolls back a failed upgrade to schema 2, keeping schema 1 and its data', async (t) => {
+  const env = setup(t);
+  schemaOneDatabase(env.file);
+  const conflicting = new DatabaseSync(env.file);
+  conflicting.exec('CREATE TABLE study_preference (legacy TEXT)');
+  conflicting.close();
+  await assert.rejects(env.open(), /already exists/);
+  assert.deepEqual(inspect(env.file, 'PRAGMA user_version'), [{ user_version: 1 }]);
+  assert.deepEqual(inspect(env.file, 'SELECT attempt_id FROM review_attempt'), [{ attempt_id: 'old' }]);
+  assert.deepEqual(inspect(env.file, 'PRAGMA table_info(study_preference)').map((column) => column.name), ['legacy']);
 });
 
 test('configures the dedicated connection before its first BEGIN and only begins IMMEDIATE', async (t) => {
@@ -332,9 +379,9 @@ test('builds today: due by date then ID, new cards in deck order within the dail
     { cardId: 'c01', revision: 1 },
   ];
 
-  const morning = await today(storage, deck, '2026-11-26T13:00:00Z');
+  const morning = await today(storage, deck, '2026-11-26T13:00:00Z', { newCardLimit: 5 });
   assert.deepEqual(morning.due, due);
-  assert.equal(morning.new.length, NEW_CARDS_PER_DAY);
+  assert.equal(morning.new.length, 5);
   assert.deepEqual(morning.new.map((card) => card.cardId), ['c05', 'c06', 'c07', 'c08', 'c09']);
   assert.equal(morning.nextDueDate, '2026-12-02');
 
@@ -348,7 +395,7 @@ test('builds today: due by date then ID, new cards in deck order within the dail
   const withoutArchived = await today(storage, deck.filter((id) => id !== 'c02'), '2026-11-26T22:00:00Z');
   assert.deepEqual(withoutArchived.due, [{ cardId: 'c03', revision: 1 }]);
 
-  const otherDeck = await today(storage, ['c01'], '2026-11-26T22:00:00Z', NY, 'other-deck');
+  const otherDeck = await today(storage, ['c01'], '2026-11-26T22:00:00Z', { deckId: 'other-deck' });
   assert.deepEqual(otherDeck.new, [{ cardId: 'c01', revision: 0 }]);
   assert.deepEqual(otherDeck.due, []);
 });
@@ -387,9 +434,9 @@ test('keeps stored dates when the device timezone changes', async (t) => {
   assert.deepEqual([first.attempt.civilDate, first.attempt.dueDate], ['2026-03-07', '2026-03-14']);
 
   const instant = '2026-03-14T03:30:00Z';
-  const inNewYork = await today(storage, ['l7-vs-l4'], instant, NY);
+  const inNewYork = await today(storage, ['l7-vs-l4'], instant);
   assert.deepEqual([inNewYork.today, inNewYork.due, inNewYork.nextDueDate], ['2026-03-13', [], '2026-03-14']);
-  const inTokyo = await today(storage, ['l7-vs-l4'], instant, 'Asia/Tokyo');
+  const inTokyo = await today(storage, ['l7-vs-l4'], instant, { timeZone: 'Asia/Tokyo' });
   assert.deepEqual(
     [inTokyo.today, inTokyo.due, inTokyo.nextDueDate],
     ['2026-03-14', [{ cardId: 'l7-vs-l4', revision: 1 }], null],
@@ -405,4 +452,97 @@ test('keeps stored dates when the device timezone changes', async (t) => {
   );
   await assert.rejects(storage.commitAttempt(attempt({ timeZone: 'Not/A_Zone' })), RangeError);
   assert.deepEqual(inspect(env.file, 'SELECT count(*) AS n FROM review_attempt'), [{ n: 2 }]);
+});
+
+test('stores the daily new-card limit across relaunch, in call order, and accepts only 1, 3, 5 or 10', async (t) => {
+  const env = setup(t);
+  const first = await env.open();
+  assert.deepEqual(NEW_CARD_LIMITS, [1, 3, 5, 10]);
+  assert.equal(await first.loadNewCardLimit(), 1);
+
+  const calls = [];
+  for (const limit of NEW_CARD_LIMITS) calls.push(first.saveNewCardLimit(limit), first.loadNewCardLimit());
+  assert.deepEqual(await Promise.all(calls), [undefined, 1, undefined, 3, undefined, 5, undefined, 10]);
+  await first.saveNewCardLimit(3);
+  await first.close();
+
+  const relaunched = await env.open();
+  assert.equal(await relaunched.loadNewCardLimit(), 3);
+  assert.deepEqual(inspect(env.file, 'SELECT * FROM study_preference'), [{ singleton: 1, new_card_limit: 3 }]);
+
+  const mark = env.expo.log.length;
+  for (const invalid of INVALID_LIMITS) {
+    await assert.rejects(relaunched.saveNewCardLimit(invalid), RangeError, String(invalid));
+    const input = { deckId: DECK, cardIds: ['c01'], now: new Date(), timeZone: NY, newCardLimit: invalid };
+    await assert.rejects(relaunched.loadToday(input), RangeError, String(invalid));
+  }
+  await assert.rejects(relaunched.loadToday({ deckId: DECK, cardIds: [], now: new Date(), timeZone: NY }), RangeError);
+  assert.deepEqual(env.expo.log.slice(mark), [], 'rejected before touching the database');
+  assert.equal(await relaunched.loadNewCardLimit(), 3);
+
+  // The schema holds the same set, for writers that bypass this module.
+  const [raw] = env.expo.handles.slice(-1);
+  for (const value of [0, 2, 4, 11]) {
+    assert.throws(() => raw.exec(`UPDATE study_preference SET new_card_limit = ${value}`), /CHECK constraint/);
+  }
+  assert.throws(() => raw.exec('INSERT INTO study_preference VALUES (2, 5)'), /CHECK constraint/);
+  assert.deepEqual(inspect(env.file, 'SELECT * FROM study_preference'), [{ singleton: 1, new_card_limit: 3 }]);
+});
+
+test('saving the limit takes the write lock and gives up after the retry budget without changing it', async (t) => {
+  const env = setup(t, { busyTimeoutMs: 5 });
+  const storage = await env.open();
+  await storage.saveNewCardLimit(5);
+  const blocker = new DatabaseSync(env.file);
+  t.after(() => blocker.close());
+  blocker.exec('BEGIN IMMEDIATE');
+
+  const mark = env.expo.log.length;
+  await assert.rejects(storage.saveNewCardLimit(10), StorageBusyError);
+  assert.equal(env.expo.log.slice(mark).filter((source) => source === 'BEGIN IMMEDIATE').length, 1 + MAX_LOCK_RETRIES);
+  blocker.exec('ROLLBACK');
+  assert.equal(await storage.loadNewCardLimit(), 5);
+  await storage.saveNewCardLimit(10);
+  assert.equal(await storage.loadNewCardLimit(), 10);
+});
+
+test('the limit caps only new cards: due reviews are never cut, and a limit below today\'s first attempts leaves none', async (t) => {
+  const storage = await setup(t).open();
+  const deck = Array.from({ length: 12 }, (_, i) => `c${String(i + 1).padStart(2, '0')}`);
+  for (const cardId of deck.slice(0, 6)) {
+    await storage.commitAttempt(attempt({ cardId, rating: 'missed', attemptedAt: new Date('2026-11-20T15:00:00Z') }));
+  }
+  const due = deck.slice(0, 6).map((cardId) => ({ cardId, revision: 1 }));
+  const at = (limit, now = '2026-11-26T13:00:00Z') => today(storage, deck, now, { newCardLimit: limit });
+  const ids = (cards) => cards.map((card) => card.cardId);
+
+  for (const [limit, fresh] of [
+    [1, ['c07']],
+    [3, ['c07', 'c08', 'c09']],
+    [5, ['c07', 'c08', 'c09', 'c10', 'c11']],
+    [10, ['c07', 'c08', 'c09', 'c10', 'c11', 'c12']],
+  ]) {
+    const result = await at(limit);
+    assert.deepEqual(result.due, due, `limit ${limit}`);
+    assert.deepEqual(ids(result.new), fresh, `limit ${limit}`);
+  }
+
+  // Three first attempts today, then a due review, which does not use the new-card budget.
+  for (const cardId of ['c07', 'c08', 'c09']) await storage.commitAttempt(attempt({ cardId }));
+  await storage.commitAttempt(attempt({ cardId: 'c01', expectedRevision: 1, rating: 'missed' }));
+  const stillDue = due.slice(1);
+  for (const [limit, fresh] of [
+    [1, []],
+    [3, []],
+    [5, ['c10', 'c11']],
+    [10, ['c10', 'c11', 'c12']],
+  ]) {
+    const result = await at(limit, '2026-11-26T22:00:00Z');
+    assert.deepEqual(result.due, stillDue, `limit ${limit} after starting three`);
+    assert.deepEqual(ids(result.new), fresh, `limit ${limit} after starting three`);
+  }
+
+  const nextDay = await at(1, '2026-11-27T15:00:00Z');
+  assert.equal(nextDay.due.length, 6);
+  assert.deepEqual(ids(nextDay.new), ['c10']);
 });

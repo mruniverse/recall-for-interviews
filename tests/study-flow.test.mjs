@@ -1,19 +1,29 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { localizeFixtureCard } from '../src/content/fixture-locales.ts';
+import { openStorage } from '../src/storage/storage.ts';
+import { createStudy } from '../src/study/controller.ts';
 import { textIn } from '../src/study/content.ts';
 import { LOCALE_KEY, NY, answer, device, fixtureDeck, memoryPreferences, prompt, rows } from './study-support.mjs';
 
 const DAY_1 = '2026-11-26T15:00:00Z';
 const DAY_2 = '2026-11-27T15:00:00Z';
 
-async function onToday(phone, options) {
+// Most flows below were written for five new questions a day; they pick it in settings, as a user would.
+async function onToday(phone, { newCardLimit = 5, ...options } = {}) {
   const app = await phone.launch(options);
   if (app.state().screen === 'onboarding') await app.study.finishOnboarding();
   assert.equal(app.state().screen, 'today');
+  if (app.state().today.newCardLimit !== newCardLimit) await app.study.chooseNewCardLimit(newCardLimit);
+  assert.equal(app.state().today.newCardLimit, newCardLimit);
   return app;
 }
+
+const storedLimit = (phone) => rows(phone.file, 'SELECT new_card_limit FROM study_preference');
 
 const attemptCount = (phone) => rows(phone.file, 'SELECT count(*) AS n FROM review_attempt')[0].n;
 
@@ -22,7 +32,14 @@ test('first launch shows English onboarding; Continue stores the language and re
   const { study, state } = await phone.launch();
   assert.equal(state().screen, 'onboarding');
   assert.equal(state().locale, 'en');
-  assert.deepEqual(state().today, { date: '2026-11-26', due: 0, new: 5, nextDueDate: null, status: 'ready' });
+  assert.deepEqual(state().today, {
+    date: '2026-11-26',
+    due: 0,
+    new: 1,
+    newCardLimit: 1,
+    nextDueDate: null,
+    status: 'ready',
+  });
   assert.equal(phone.preferences.values.has(LOCALE_KEY), false);
 
   await study.finishOnboarding();
@@ -280,6 +297,7 @@ test('rated attempts survive a relaunch; the unfinished prompt and its draft are
     date: '2026-11-26',
     due: 0,
     new: 3,
+    newCardLimit: 5,
     nextDueDate: '2026-11-27',
     status: 'ready',
   });
@@ -347,7 +365,14 @@ for (const locale of ['en', 'pt-BR']) {
 
 test('Today tells an empty deck apart from caught up and shows the next review date', async (t) => {
   const empty = await device(t).launch({ deck: { ...fixtureDeck(), cards: [] } });
-  assert.deepEqual(empty.state().today, { date: '2026-11-26', due: 0, new: 0, nextDueDate: null, status: 'empty' });
+  assert.deepEqual(empty.state().today, {
+    date: '2026-11-26',
+    due: 0,
+    new: 0,
+    newCardLimit: 1,
+    nextDueDate: null,
+    status: 'empty',
+  });
 
   const { study, state } = await onToday(device(t));
   await study.start();
@@ -357,7 +382,14 @@ test('Today tells an empty deck apart from caught up and shows the next review d
   }
   assert.equal(state().summary.nextReview, '2026-12-03');
   await study.closeSummary();
-  assert.deepEqual(state().today, { date: '2026-11-26', due: 0, new: 0, nextDueDate: '2026-12-03', status: 'caught-up' });
+  assert.deepEqual(state().today, {
+    date: '2026-11-26',
+    due: 0,
+    new: 0,
+    newCardLimit: 5,
+    nextDueDate: '2026-12-03',
+    status: 'caught-up',
+  });
   await study.start();
   assert.equal(state().screen, 'today', 'nothing to start when caught up');
 });
@@ -493,4 +525,270 @@ test('Today refreshes after midnight on foreground, and a double Start opens one
   await Promise.all([study.start(), study.start()]);
   assert.equal(ids.length, before + 1);
   assert.equal(state().session.queue.length, 6);
+});
+
+test('one new question a day by default; the chosen limit is stored in SQLite and survives relaunch', async (t) => {
+  const phone = device(t);
+  const first = await phone.launch();
+  assert.deepEqual([first.state().today.newCardLimit, first.state().today.new], [1, 1]);
+  await first.study.finishOnboarding();
+  await first.study.start();
+  assert.deepEqual(first.state().session.queue.map((item) => item.kind), ['new']);
+  await first.study.leave();
+  assert.deepEqual(storedLimit(phone), [], 'the default is not written until the user chooses');
+
+  await first.study.chooseNewCardLimit(3);
+  assert.deepEqual(
+    [first.state().today.newCardLimit, first.state().today.new, first.state().notice, first.state().savingLimit],
+    [3, 3, null, false],
+  );
+  assert.deepEqual(storedLimit(phone), [{ new_card_limit: 3 }]);
+  await first.study.dispose(); // force quit
+
+  const relaunched = await phone.launch();
+  assert.deepEqual([relaunched.state().screen, relaunched.state().today.newCardLimit, relaunched.state().today.new], [
+    'today',
+    3,
+    3,
+  ]);
+  await relaunched.study.chooseNewCardLimit(10);
+  assert.deepEqual([relaunched.state().today.newCardLimit, relaunched.state().today.new], [10, 10]);
+  assert.deepEqual(storedLimit(phone), [{ new_card_limit: 10 }]);
+});
+
+test('lowering the limit below the new questions answered today leaves none, and due reviews stay', async (t) => {
+  const phone = device(t);
+  const day1 = await onToday(phone);
+  await day1.study.start();
+  for (const rating of ['missed', 'missed', 'correct']) {
+    await answer(day1.study, rating);
+    await day1.study.next();
+  }
+  await day1.study.leave();
+  assert.deepEqual([day1.state().today.due, day1.state().today.new], [0, 2]);
+  for (const limit of [3, 1]) {
+    await day1.study.chooseNewCardLimit(limit);
+    assert.deepEqual([day1.state().today.newCardLimit, day1.state().today.new], [limit, 0]);
+  }
+  assert.equal(day1.state().today.status, 'caught-up');
+  await day1.study.start();
+  assert.equal(day1.state().screen, 'today', 'no new question is left today');
+  await day1.study.chooseNewCardLimit(10);
+  assert.deepEqual([day1.state().today.new, day1.state().today.status], [7, 'ready']);
+  await day1.study.chooseNewCardLimit(1);
+
+  phone.setClock(DAY_2);
+  const day2 = await phone.launch();
+  assert.deepEqual([day2.state().today.due, day2.state().today.new], [2, 1]);
+  await day2.study.start();
+  assert.deepEqual(
+    day2.state().session.queue.map((item) => [item.kind, item.cardId]),
+    [
+      ['due', 'sd-cache-aside'],
+      ['due', 'sd-rate-limit'],
+      ['new', 'sd-backpressure'],
+    ],
+  );
+  await answer(day2.study, 'correct');
+  await day2.study.next();
+  await answer(day2.study, 'correct');
+  await day2.study.next();
+  await answer(day2.study, 'correct');
+  await day2.study.next();
+  assert.equal(day2.state().screen, 'summary');
+  await day2.study.closeSummary();
+  assert.deepEqual([day2.state().today.due, day2.state().today.new, day2.state().today.status], [0, 0, 'caught-up']);
+
+  // With more reviews due than the limit, every review is still queued.
+  phone.setClock('2026-12-03T15:00:00Z');
+  const later = await phone.launch();
+  assert.deepEqual([later.state().today.newCardLimit, later.state().today.due, later.state().today.new], [1, 1, 1]);
+  phone.setClock('2026-12-04T15:00:00Z');
+  await later.study.refresh();
+  assert.deepEqual([later.state().today.due, later.state().today.new], [4, 1]);
+});
+
+test('changing the limit never alters a started session: its queue stays frozen and every card can be saved', async (t) => {
+  const phone = device(t);
+  const { study, state, commits } = await onToday(phone);
+  await study.start();
+  const { queue } = state().session;
+  assert.deepEqual(queue.map((item) => item.kind), ['new', 'new', 'new', 'new', 'new']);
+
+  const before = state();
+  await study.chooseNewCardLimit(1);
+  assert.equal(state(), before, 'the setting is not available during a session');
+  assert.deepEqual(storedLimit(phone), [{ new_card_limit: 5 }]);
+
+  // Another writer lowers the stored limit mid-session; the frozen queue is still played in full.
+  await (await phone.otherHandle()).saveNewCardLimit(1);
+  for (let i = 0; i < queue.length; i++) {
+    assert.equal(state().session.queue, queue);
+    await answer(study, 'correct');
+    await study.next();
+  }
+  assert.deepEqual([state().screen, state().summary.answered, commits.length], ['summary', 5, 5]);
+
+  const relaunched = await phone.launch();
+  assert.deepEqual([relaunched.state().today.newCardLimit, relaunched.state().today.new], [1, 0]);
+});
+
+test('Start and the limit wait for each other, so the queue uses the limit on screen', async (t) => {
+  const phone = device(t);
+  const { study, state } = await onToday(phone);
+  const saving = study.chooseNewCardLimit(1);
+  assert.equal(state().savingLimit, true);
+  await Promise.all([study.start(), study.chooseNewCardLimit(10), study.chooseLocale('pt-BR')]);
+  study.showOnboarding();
+  await saving;
+  assert.deepEqual([state().screen, state().locale, state().today.newCardLimit, state().savingLimit], ['today', 'en', 1, false]);
+  assert.deepEqual(storedLimit(phone), [{ new_card_limit: 1 }]);
+
+  const starting = study.start();
+  await study.chooseNewCardLimit(10);
+  await starting;
+  assert.equal(state().session.queue.length, 1);
+  assert.deepEqual(storedLimit(phone), [{ new_card_limit: 1 }]);
+});
+
+test('an invalid limit is ignored without writing or changing Today', async (t) => {
+  const phone = device(t);
+  const { study, state } = await onToday(phone, { newCardLimit: 1 });
+  const before = state();
+  for (const invalid of [0, 2, 4, 11, 5.5, NaN, '5', null, undefined]) {
+    await study.chooseNewCardLimit(invalid);
+    assert.equal(state(), before, String(invalid));
+  }
+  assert.deepEqual(storedLimit(phone), []);
+});
+
+test('a limit that cannot be saved keeps the previous limit and counts, then saves on retry', async (t) => {
+  const phone = device(t, { busyTimeoutMs: 5 });
+  const { study, state } = await onToday(phone, { newCardLimit: 3 });
+  const blocker = new DatabaseSync(phone.file);
+  t.after(() => blocker.close());
+  blocker.exec('BEGIN IMMEDIATE');
+
+  await study.chooseNewCardLimit(10);
+  assert.deepEqual(
+    [state().today.newCardLimit, state().today.new, state().notice, state().savingLimit],
+    [3, 3, 'limit-not-saved', false],
+  );
+  assert.deepEqual(storedLimit(phone), [{ new_card_limit: 3 }]);
+  await study.start();
+  assert.equal(state().session.queue.length, 3, 'Start still uses the stored limit');
+  await study.leave();
+
+  blocker.exec('ROLLBACK');
+  await study.chooseNewCardLimit(10);
+  assert.deepEqual([state().today.newCardLimit, state().today.new, state().notice], [10, 10, null]);
+  assert.deepEqual(storedLimit(phone), [{ new_card_limit: 10 }]);
+});
+
+// A real SQLite file whose statements can be intercepted, so a test can act between two of them.
+function hookedDevice(t) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'recall-limit-race-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const tick = () => new Promise((resolve) => setImmediate(resolve));
+  let beforeExec = null;
+  const opener = async (name) => {
+    const raw = new DatabaseSync(path.join(dir, name), { enableForeignKeyConstraints: false });
+    const call = async (work) => {
+      await tick();
+      return work();
+    };
+    return {
+      execAsync: (source) =>
+        call(() => {
+          beforeExec?.(source);
+          raw.exec(source);
+        }),
+      runAsync: (source, params) => call(() => ({ changes: Number(raw.prepare(source).run(params).changes) })),
+      getFirstAsync: (source, params) => call(() => raw.prepare(source).get(params) ?? null),
+      getAllAsync: (source, params) => call(() => raw.prepare(source).all(params)),
+      closeAsync: () => call(() => raw.close()),
+    };
+  };
+  return { file: path.join(dir, 'recall.db'), opener, setHook: (fn) => (beforeExec = fn) };
+}
+
+test('a refresh that starts inside the limit COMMIT is not run, so the saved limit stays on Today', async (t) => {
+  const phone = hookedDevice(t);
+  const study = createStudy({
+    openStorage: () => openStorage(phone.opener, 'recall.db'),
+    preferences: memoryPreferences({ [LOCALE_KEY]: 'en' }),
+    deck: fixtureDeck(),
+    localize: localizeFixtureCard,
+    now: () => new Date('2026-11-26T15:00:00Z'),
+    timeZone: () => NY,
+  });
+  t.after(() => study.dispose());
+  await study.init();
+  await study.start();
+  await answer(study, 'correct');
+  await study.leave();
+  assert.deepEqual([study.getState().today.newCardLimit, study.getState().today.new, study.getState().today.status], [1, 0, 'caught-up']);
+
+  let refreshing = null;
+  phone.setHook((source) => {
+    if (source !== 'COMMIT') return;
+    phone.setHook(null);
+    assert.equal(study.getState().savingLimit, true);
+    refreshing = study.refresh(); // the AppState('active') call, made while the limit is being stored
+  });
+  await study.chooseNewCardLimit(10);
+  assert.ok(refreshing, 'the refresh started inside the real limit transaction');
+  const view = () => [study.getState().today.newCardLimit, study.getState().today.new, study.getState().today.status];
+  assert.deepEqual(view(), [10, 9, 'ready']);
+  await refreshing;
+  assert.deepEqual(view(), [10, 9, 'ready'], 'a refresh during the COMMIT must not restore the previous limit');
+  assert.deepEqual(rows(phone.file, 'SELECT new_card_limit FROM study_preference'), [{ new_card_limit: 10 }]);
+  await study.start();
+  assert.equal(study.getState().session.queue.length, 9);
+});
+
+test('a refresh started before a limit change that finishes after it cannot restore the old limit', async (t) => {
+  const phone = hookedDevice(t);
+  let gate = null;
+  const study = createStudy({
+    openStorage: async () => {
+      const storage = await openStorage(phone.opener, 'recall.db');
+      return {
+        ...storage,
+        async loadToday(input) {
+          const today = await storage.loadToday(input);
+          // Holds only the refresh's read, taken with the old limit, until the change has finished.
+          if (input.newCardLimit === 1 && gate) await gate;
+          return today;
+        },
+      };
+    },
+    preferences: memoryPreferences({ [LOCALE_KEY]: 'en' }),
+    deck: fixtureDeck(),
+    localize: localizeFixtureCard,
+    now: () => new Date('2026-11-26T15:00:00Z'),
+    timeZone: () => NY,
+  });
+  t.after(() => study.dispose());
+  await study.init();
+  await study.start();
+  await answer(study, 'correct');
+  await study.leave();
+  assert.deepEqual([study.getState().today.newCardLimit, study.getState().today.new], [1, 0]);
+
+  let release;
+  gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  const refreshing = study.refresh();
+  await study.chooseNewCardLimit(10);
+  assert.deepEqual([study.getState().today.newCardLimit, study.getState().today.new, study.getState().today.status], [10, 9, 'ready']);
+  release();
+  await refreshing;
+  assert.deepEqual(
+    [study.getState().today.newCardLimit, study.getState().today.new, study.getState().today.status],
+    [10, 9, 'ready'],
+    'the older refresh finishing after the change must be dropped',
+  );
+  assert.deepEqual(rows(phone.file, 'SELECT new_card_limit FROM study_preference'), [{ new_card_limit: 10 }]);
 });

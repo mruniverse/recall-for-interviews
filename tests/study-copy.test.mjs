@@ -35,6 +35,33 @@ test('both languages define every interface string, English by default', () => {
   for (const value of ['pt', 'EN', '', null, undefined]) assert.equal(isStudyLocale(value), false);
 });
 
+test('the daily new-question limit is spelled out in each language, with singular and plural', () => {
+  const en = COPY.en;
+  const pt = COPY['pt-BR'];
+  assert.deepEqual(
+    [1, 3, 5, 10].map((n) => en.newCardLimitOption(n)),
+    ['1 new question per day', '3 new questions per day', '5 new questions per day', '10 new questions per day'],
+  );
+  assert.deepEqual(
+    [1, 3, 5, 10].map((n) => pt.newCardLimitOption(n)),
+    ['1 pergunta nova por dia', '3 perguntas novas por dia', '5 perguntas novas por dia', '10 perguntas novas por dia'],
+  );
+  assert.match(en.rules(1)[2], /^Up to 1 new question per day; .*Due reviews are never limited/);
+  assert.match(en.rules(10)[2], /^Up to 10 new questions per day; /);
+  assert.match(pt.rules(1)[2], /^Até 1 pergunta nova por dia; .*Revisões pendentes nunca são limitadas/);
+  assert.match(pt.rules(10)[2], /^Até 10 perguntas novas por dia; /);
+  assert.equal(en.rules(3)[3], en.draftsRule);
+  assert.equal(pt.rules(3)[3], pt.draftsRule);
+  assert.deepEqual([en.settings, pt.settings], ['Settings', 'Configurações']);
+  assert.match(pt.rules(3)[2], /Configurações/);
+  assert.match(en.rules(3)[2], /Settings/);
+  // No English left in the Portuguese settings copy, and vice versa.
+  const ptSettings = [pt.newCardLimit, pt.newCardLimitHelp, pt.newCardLimitOption(3), pt.notices['limit-not-saved'], pt.rules(3)[2]];
+  for (const text of ptSettings) assert.doesNotMatch(text, /\b(new|questions?|per day|limit|reviews?|settings)\b/i, text);
+  const enSettings = [en.newCardLimit, en.newCardLimitHelp, en.newCardLimitOption(3), en.notices['limit-not-saved'], en.rules(3)[2]];
+  for (const text of enSettings) assert.doesNotMatch(text, /\b(perguntas?|novas?|por dia|limite|revisões|configurações)\b/i, text);
+});
+
 test('labels the build as a prototype with unreviewed fixture content, never as released', () => {
   assert.match(COPY.en.prototypeLabel, /prototype/i);
   assert.match(COPY.en.prototypeLabel, /fixture deck, not reviewed/);

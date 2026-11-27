@@ -1,8 +1,15 @@
 import { schedule, type Rating } from '../scheduler/schedule.ts';
 import { MIGRATIONS } from './schema.ts';
 
-export const NEW_CARDS_PER_DAY = 5;
+/** Daily new-card limits the user can choose; the `study_preference` CHECK constraint mirrors this set. */
+export const NEW_CARD_LIMITS = [1, 3, 5, 10] as const;
+export type NewCardLimit = (typeof NEW_CARD_LIMITS)[number];
+/** Applies until the user picks another limit, including after upgrading from schema 1. */
+export const DEFAULT_NEW_CARD_LIMIT: NewCardLimit = 1;
 export const MAX_LOCK_RETRIES = 3;
+
+export const isNewCardLimit = (value: unknown): value is NewCardLimit =>
+  typeof value === 'number' && (NEW_CARD_LIMITS as readonly number[]).includes(value);
 
 type BindParams = Record<string, string | number | null>;
 
@@ -65,11 +72,16 @@ export interface TodayInput {
   cardIds: readonly string[];
   now: Date;
   timeZone: string;
+  /**
+   * New cards allowed per local day, one of `NEW_CARD_LIMITS`. First attempts already made today
+   * count against it, so a limit at or below them leaves no new cards; due cards are never capped.
+   */
+  newCardLimit: NewCardLimit;
 }
 
 export interface Today {
   today: string;
-  /** Due on or before today, by due date then card ID. */
+  /** Due on or before today, by due date then card ID; never capped. */
   due: QueueCard[];
   /** Never-attempted cards in deck order, capped by today's remaining new-card budget. */
   new: QueueCard[];
@@ -79,7 +91,12 @@ export interface Today {
 
 export interface Storage {
   commitAttempt(input: AttemptInput): Promise<CommitResult>;
+  /** @throws RangeError when `newCardLimit` is not one of `NEW_CARD_LIMITS`. */
   loadToday(input: TodayInput): Promise<Today>;
+  /** The stored daily new-card limit, or `DEFAULT_NEW_CARD_LIMIT` when none was chosen. */
+  loadNewCardLimit(): Promise<NewCardLimit>;
+  /** @throws RangeError, before touching the database, when `limit` is not one of `NEW_CARD_LIMITS`. */
+  saveNewCardLimit(limit: NewCardLimit): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -145,8 +162,14 @@ export async function openStorage(
       return serialize(() => writeTransaction(db, () => commit(db, input, civilDate, attemptedAt)));
     },
     async loadToday(input) {
+      if (!isNewCardLimit(input.newCardLimit)) throw new RangeError('Invalid new-card limit');
       const today = localCivilDate(input.now, input.timeZone);
       return serialize(() => readToday(db, input, today));
+    },
+    loadNewCardLimit: () => serialize(() => readNewCardLimit(db)),
+    async saveNewCardLimit(limit) {
+      if (!isNewCardLimit(limit)) throw new RangeError('Invalid new-card limit');
+      return serialize(() => writeTransaction(db, () => writeNewCardLimit(db, limit)));
     },
     close: () => serialize(() => db.closeAsync()),
   };
@@ -298,8 +321,27 @@ async function readToday(db: SQLiteConnection, input: TodayInput, today: string)
       .map((row) => ({ cardId: row.card_id, revision: row.revision })),
     new: [...active]
       .filter((cardId) => !seen.has(cardId))
-      .slice(0, Math.max(0, NEW_CARDS_PER_DAY - started))
+      .slice(0, Math.max(0, input.newCardLimit - started))
       .map((cardId) => ({ cardId, revision: 0 })),
     nextDueDate: tracked.find((row) => row.due_date > today)?.due_date ?? null,
   };
+}
+
+async function readNewCardLimit(db: SQLiteConnection): Promise<NewCardLimit> {
+  const row = await db.getFirstAsync<{ new_card_limit: number }>(
+    'SELECT new_card_limit FROM study_preference WHERE singleton = 1',
+    {},
+  );
+  if (!row) return DEFAULT_NEW_CARD_LIMIT;
+  // The CHECK constraint makes this unreachable unless the file was edited outside the app.
+  if (!isNewCardLimit(row.new_card_limit)) throw new Error('Stored new-card limit is invalid');
+  return row.new_card_limit;
+}
+
+async function writeNewCardLimit(db: SQLiteConnection, limit: NewCardLimit): Promise<void> {
+  await db.runAsync(
+    `INSERT INTO study_preference (singleton, new_card_limit) VALUES (1, $limit)
+     ON CONFLICT (singleton) DO UPDATE SET new_card_limit = excluded.new_card_limit`,
+    { $limit: limit },
+  );
 }

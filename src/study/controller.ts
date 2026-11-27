@@ -3,7 +3,16 @@
 // taps; async results are applied only while the prompt that started them is still on screen.
 import type { Card, Deck } from '../content/deck.ts';
 import type { Rating } from '../scheduler/schedule.ts';
-import { StorageBusyError, type Attempt, type CommitResult, type Storage, type Today } from '../storage/storage.ts';
+import {
+  DEFAULT_NEW_CARD_LIMIT,
+  isNewCardLimit,
+  StorageBusyError,
+  type Attempt,
+  type CommitResult,
+  type NewCardLimit,
+  type Storage,
+  type Today,
+} from '../storage/storage.ts';
 import { localizeDeck, type CardLocalizer } from './content.ts';
 import { DEFAULT_LOCALE, isStudyLocale, type Copy, type StudyLocale } from './copy.ts';
 import { newAttemptId } from './ids.ts';
@@ -23,6 +32,8 @@ export interface TodayView {
   date: string;
   due: number;
   new: number;
+  /** The daily new-card limit these counts were computed with. */
+  newCardLimit: NewCardLimit;
   /** Earliest due date after today; null when none. */
   nextDueDate: string | null;
   /** `empty`: the deck has no active cards; `caught-up`: it has, but none is due or new today. */
@@ -77,7 +88,15 @@ export type StudyState =
   | { screen: 'loading'; locale: StudyLocale }
   | { screen: 'unavailable'; locale: StudyLocale; problem: 'storage' | 'content' }
   | { screen: 'onboarding'; locale: StudyLocale; today: TodayView; notice: Notice | null }
-  | { screen: 'today'; locale: StudyLocale; today: TodayView; notice: Notice | null; starting: boolean }
+  | {
+      screen: 'today';
+      locale: StudyLocale;
+      today: TodayView;
+      notice: Notice | null;
+      starting: boolean;
+      /** A new daily limit is being stored; Start and the settings wait for it. */
+      savingLimit: boolean;
+    }
   | { screen: 'study'; locale: StudyLocale; session: Session }
   | { screen: 'summary'; locale: StudyLocale; summary: Summary };
 
@@ -99,6 +118,11 @@ export interface StudyController {
   init(): Promise<void>;
   /** Available on onboarding, Today and a content error; never during a session. */
   chooseLocale(locale: StudyLocale): Promise<void>;
+  /**
+   * Recounts Today with `limit` and stores it as the daily new-card limit; on failure nothing changes.
+   * Available on Today only, so a session's queue never changes. Values outside `NEW_CARD_LIMITS` are ignored.
+   */
+  chooseNewCardLimit(limit: NewCardLimit): Promise<void>;
   finishOnboarding(): Promise<void>;
   showOnboarding(): void;
   /** Reloads Today's counts; ignored outside onboarding and Today so a session queue stays frozen. */
@@ -136,8 +160,12 @@ export function createStudy(deps: StudyDependencies): StudyController {
   let state: StudyState = { screen: 'loading', locale: DEFAULT_LOCALE };
   let cards = new Map<string, Card>();
   let storage: Storage | null = null;
+  // Loaded with storage; `storage !== null` implies it holds the stored preference.
+  let newCardLimit: NewCardLimit = DEFAULT_NEW_CARD_LIMIT;
   let initialized = false;
   let onboarded = false;
+  // Bumped when a valid limit choice or a refresh starts; a refresh publishes only if it is still the latest.
+  let generation = 0;
   let preferenceWrites: Promise<unknown> = Promise.resolve();
 
   function set(next: StudyState) {
@@ -170,29 +198,53 @@ export function createStudy(deps: StudyDependencies): StudyController {
     }
   }
 
-  const readToday = (): Promise<Today> =>
-    storage!.loadToday({ deckId: deps.deck.deckId, cardIds, now: now(), timeZone: deviceTimeZone() });
+  const readToday = (limit: NewCardLimit = newCardLimit): Promise<Today> =>
+    storage!.loadToday({
+      deckId: deps.deck.deckId,
+      cardIds,
+      now: now(),
+      timeZone: deviceTimeZone(),
+      newCardLimit: limit,
+    });
 
-  const view = (today: Today): TodayView => ({
+  const view = (today: Today, limit: NewCardLimit): TodayView => ({
     date: today.today,
     due: today.due.length,
     new: today.new.length,
+    newCardLimit: limit,
     nextDueDate: today.nextDueDate,
     status: cardIds.length === 0 ? 'empty' : today.due.length + today.new.length > 0 ? 'ready' : 'caught-up',
   });
+
+  const loadView = async (limit: NewCardLimit = newCardLimit): Promise<TodayView> => view(await readToday(limit), limit);
+
+  /** Today with no start or limit change in flight: the only state that accepts settings and Start. */
+  const isIdleToday = (current: StudyState): current is Extract<StudyState, { screen: 'today' }> =>
+    current.screen === 'today' && !current.starting && !current.savingLimit;
+
+  async function connect() {
+    const opened = await deps.openStorage();
+    try {
+      newCardLimit = await opened.loadNewCardLimit();
+    } catch (error) {
+      await opened.close().catch(() => undefined);
+      throw error;
+    }
+    storage = opened;
+  }
 
   async function enter(locale: StudyLocale) {
     if (!applyLocale(locale)) return set({ screen: 'unavailable', locale, problem: 'content' });
     let today: TodayView;
     try {
-      storage ??= await deps.openStorage();
-      today = view(await readToday());
+      if (!storage) await connect();
+      today = await loadView();
     } catch {
       return set({ screen: 'unavailable', locale, problem: 'storage' });
     }
     set(
       onboarded
-        ? { screen: 'today', locale, today, notice: null, starting: false }
+        ? { screen: 'today', locale, today, notice: null, starting: false, savingLimit: false }
         : { screen: 'onboarding', locale, today, notice: null },
     );
   }
@@ -201,7 +253,7 @@ export function createStudy(deps: StudyDependencies): StudyController {
     const { locale } = state;
     set({ screen: 'loading', locale });
     try {
-      set({ screen: 'today', locale, today: view(await readToday()), notice, starting: false });
+      set({ screen: 'today', locale, today: await loadView(), notice, starting: false, savingLimit: false });
     } catch {
       set({ screen: 'unavailable', locale, problem: 'storage' });
     }
@@ -304,47 +356,76 @@ export function createStudy(deps: StudyDependencies): StudyController {
         if (!saved) showNotice('locale-not-saved', locale);
         return;
       }
-      if (current.screen !== 'onboarding' && !(current.screen === 'today' && !current.starting)) return;
+      if (current.screen !== 'onboarding' && !isIdleToday(current)) return;
       if (!applyLocale(locale)) return set({ ...current, notice: 'locale-unavailable' });
       set({ ...current, locale, notice: null });
       // Before onboarding completes, the choice is stored by `finishOnboarding`.
       if (onboarded && !(await persistLocale(locale))) showNotice('locale-not-saved', locale);
     },
 
+    async chooseNewCardLimit(limit) {
+      const current = state;
+      if (!isIdleToday(current) || !storage || !isNewCardLimit(limit)) return;
+      generation += 1;
+      set({ ...current, notice: null, savingLimit: true });
+      // Counts first, then the write: if either fails, the previous limit and its counts stay.
+      let today: TodayView;
+      try {
+        today = await loadView(limit);
+        await storage.saveNewCardLimit(limit);
+      } catch {
+        if (state.screen === 'today') set({ ...state, notice: 'limit-not-saved', savingLimit: false });
+        return;
+      }
+      newCardLimit = limit;
+      if (state.screen === 'today') set({ ...state, today, notice: null, savingLimit: false });
+    },
+
     async finishOnboarding() {
       const current = state;
       if (current.screen !== 'onboarding') return;
       onboarded = true;
-      set({ screen: 'today', locale: current.locale, today: current.today, notice: null, starting: false });
+      set({
+        screen: 'today',
+        locale: current.locale,
+        today: current.today,
+        notice: null,
+        starting: false,
+        savingLimit: false,
+      });
       if (!(await persistLocale(current.locale))) showNotice('locale-not-saved', current.locale);
     },
 
     showOnboarding() {
-      if (state.screen !== 'today' || state.starting) return;
+      if (!isIdleToday(state)) return;
       set({ screen: 'onboarding', locale: state.locale, today: state.today, notice: null });
     },
 
     async refresh() {
       if (!storage || (state.screen !== 'onboarding' && state.screen !== 'today')) return;
+      // Not while a limit is being stored or a session is starting: their counts would be read mid-write.
+      if (state.screen === 'today' && (state.starting || state.savingLimit)) return;
+      const started = ++generation;
       let today: TodayView;
       try {
-        today = view(await readToday());
+        today = await loadView();
       } catch {
         return;
       }
       const current = state;
-      if (current.screen === 'onboarding' || (current.screen === 'today' && !current.starting)) {
-        set({ ...current, today });
-      }
+      // Superseded by a limit change or a newer refresh that started after this one: drop this result.
+      if (started !== generation) return;
+      if (current.screen === 'onboarding' || isIdleToday(current)) set({ ...current, today });
     },
 
     async start() {
       const current = state;
-      if (current.screen !== 'today' || current.starting || !storage) return;
+      if (!isIdleToday(current) || !storage) return;
       set({ ...current, notice: null, starting: true });
+      const limit = newCardLimit;
       let today: Today;
       try {
-        today = await readToday();
+        today = await readToday(limit);
       } catch {
         return set({ ...current, notice: 'load-failed', starting: false });
       }
@@ -353,7 +434,9 @@ export function createStudy(deps: StudyDependencies): StudyController {
         ...today.new.map((card) => ({ ...card, kind: 'new' as const })),
       ];
       const { locale } = current;
-      if (queue.length === 0) return set({ screen: 'today', locale, today: view(today), notice: null, starting: false });
+      if (queue.length === 0) {
+        return set({ screen: 'today', locale, today: view(today, limit), notice: null, starting: false, savingLimit: false });
+      }
       set({
         screen: 'study',
         locale,
@@ -415,7 +498,7 @@ export function createStudy(deps: StudyDependencies): StudyController {
       set({ ...state, session: { ...session, finishing: true } });
       let today: TodayView | null = null;
       try {
-        today = view(await readToday());
+        today = await loadView();
       } catch {
         today = null;
       }

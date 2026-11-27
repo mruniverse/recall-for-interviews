@@ -29,4 +29,10 @@ export const MIGRATIONS: readonly string[] = [
   ) STRICT;
 
   CREATE INDEX review_attempt_by_day ON review_attempt (deck_id, civil_date);`,
+
+  // One row at most; no row means the default limit. The CHECK mirrors NEW_CARD_LIMITS in storage.ts.
+  `CREATE TABLE study_preference (
+    singleton INTEGER NOT NULL PRIMARY KEY CHECK (singleton = 1),
+    new_card_limit INTEGER NOT NULL CHECK (new_card_limit IN (1, 3, 5, 10))
+  ) STRICT;`,
 ];
