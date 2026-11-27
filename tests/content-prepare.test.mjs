@@ -90,7 +90,7 @@ test('the mode is explicit and unknown or misplaced arguments are rejected', () 
 
 test('private mode accepts an approved, sourced deck outside the checkout and bundles no reviewer or source data', async () => {
   const dir = writeDeck(join(sandbox, 'private-ok'), await approve(sampleDeck()));
-  const run = prepare('--mode', 'private', '--deck', dir);
+  const run = prepare('--mode', 'private', '--deck', dir, '--initial');
   assert.equal(run.status, 0, run.stderr);
   const text = readFileSync(output, 'utf8');
   assert.equal(JSON.parse(text).mode, 'private');
@@ -109,22 +109,23 @@ test('private mode requires a deck that exists outside the checkout after resolv
   mkdirSync(insideDir);
   symlinkSync(join(outsideFile, 'deck.json'), join(insideDir, 'deck.json'));
 
-  assertFailsClosed(['--mode', 'private', '--deck', join(sandbox, 'absent')], /private deck not found/);
-  assertFailsClosed(['--mode', 'private', '--deck', inside], /must live outside this checkout/);
-  assertFailsClosed(['--mode', 'private', '--deck', join(sandbox, 'dir-link')], /must live outside this checkout/);
-  assertFailsClosed(['--mode', 'private', '--deck', fileLink], /must live outside this checkout/);
-  assertFailsClosed(['--mode', 'private', '--deck', insideDir], /must live outside this checkout/);
-  assertFailsClosed(['--mode', 'private', '--deck', join(checkout, 'src', 'content', 'fixtures')], /must live outside this checkout/);
+  const first = ['--mode', 'private', '--initial'];
+  assertFailsClosed([...first, '--deck', join(sandbox, 'absent')], /private deck not found/);
+  assertFailsClosed([...first, '--deck', inside], /must live outside this checkout/);
+  assertFailsClosed([...first, '--deck', join(sandbox, 'dir-link')], /must live outside this checkout/);
+  assertFailsClosed([...first, '--deck', fileLink], /must live outside this checkout/);
+  assertFailsClosed([...first, '--deck', insideDir], /must live outside this checkout/);
+  assertFailsClosed([...first, '--deck', join(checkout, 'src', 'content', 'fixtures')], /must live outside this checkout/);
 });
 
 test('private mode fails closed on unreviewed, unsourced or unreadable decks without echoing their content', () => {
   const unreviewed = writeDeck(join(sandbox, 'unreviewed'), sampleDeck());
-  const run = assertFailsClosed(['--mode', 'private', '--deck', unreviewed], /invalid deck \(24 problems\)/);
+  const run = assertFailsClosed(['--mode', 'private', '--initial', '--deck', unreviewed], /invalid deck \(24 problems\)/);
   assert.match(run.stderr, /card networking-open-1\.review: must be approved for a private release/);
   assert.match(run.stderr, /card networking-open-1\.provenance\.sources: needs a question-pattern source/);
 
   const broken = writeDeck(join(sandbox, 'broken'), '{"cards": SECRET}');
-  const failed = assertFailsClosed(['--mode', 'private', '--deck', broken], /deck is not readable JSON/);
+  const failed = assertFailsClosed(['--mode', 'private', '--initial', '--deck', broken], /deck is not readable JSON/);
   assert.ok(!failed.stderr.includes('SECRET'));
 });
 
@@ -174,4 +175,38 @@ test('--previous compares a schema-1 baseline safely and refuses one it cannot r
   const unreadable = assertFailsClosed(['--mode', 'private', '--deck', dir, '--previous', writePrevious('garbage', '{SECRET')], /previous deck is not readable JSON/);
   assert.ok(!unreadable.stderr.includes('SECRET'));
   assertFailsClosed(['--mode', 'private', '--deck', dir, '--previous', join(sandbox, 'absent.json')], /previous deck is not readable JSON/);
+});
+
+test('private mode needs exactly one of --initial and --previous, and both or neither is refused', async () => {
+  const dir = writeDeck(join(sandbox, 'xor'), await approve(sampleDeck()));
+  const previous = writePrevious('xor-previous', await approve(sampleDeck()));
+  assertFailsClosed(['--mode', 'private', '--deck', dir], /needs --initial for the first deck, or --previous/);
+  assertFailsClosed(['--mode', 'private', '--deck', dir, '--initial', '--previous', previous], /takes exactly one of --initial and --previous, not both/);
+  assertFailsClosed(['--mode', 'private', '--deck', dir, '--initial=false'], /Option '--initial' does not take an argument/);
+  assertFailsClosed(['--mode', 'private', '--deck', dir, '--initial', 'true'], /Unexpected argument 'true'/);
+  assertFailsClosed(['--mode', 'private', '--deck', dir, '--no-initial'], /Unknown option '--no-initial'/);
+  assertFailsClosed(['--mode', 'private', '--deck', dir, '--initial', '--previous', previous, '--bogus'], /Unknown option '--bogus'/);
+  assertFailsClosed(['--mode', 'private', '--deck', dir, '--initial', '--bogus', 'x'], /Unknown option '--bogus'/);
+});
+
+test('fixtures mode refuses --initial and still accepts an optional --previous', () => {
+  assertFailsClosed(['--mode', 'fixtures', '--initial'], /--initial is only accepted with --mode private/);
+  assertFailsClosed(['--mode', 'fixtures', '--initial', '--previous', writePrevious('fixtures-initial', sampleDeck())], /--initial is only accepted with --mode private/);
+  const run = prepare('--mode', 'fixtures', '--previous', writePrevious('fixtures-previous', sampleDeck()));
+  assert.equal(run.status, 0, run.stderr);
+  assert.equal(JSON.parse(readFileSync(output, 'utf8')).mode, 'fixtures');
+});
+
+test('private --initial accepts a first approved deck without a previous baseline', async () => {
+  const dir = writeDeck(join(sandbox, 'first-valid'), await approve(sampleDeck()));
+  const run = prepare('--mode', 'private', '--deck', dir, '--initial');
+  assert.equal(run.status, 0, run.stderr);
+  assert.match(run.stdout, /private deck synthetic-deck r1, 12 cards/);
+});
+
+test('private --previous accepts a later approved deck against a valid baseline', async () => {
+  const dir = writeDeck(join(sandbox, 'later-valid'), await approve(sampleDeck()));
+  const run = prepare('--mode', 'private', '--deck', dir, '--previous', writePrevious('later-valid-previous', await approve(sampleDeck())));
+  assert.equal(run.status, 0, run.stderr);
+  assert.equal(JSON.parse(readFileSync(output, 'utf8')).mode, 'private');
 });
