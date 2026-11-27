@@ -2,7 +2,9 @@
 
 An iOS-first study app for software engineers preparing for technical interviews in English. Practice recalling a concept, explain a trade-off, and revisit it on a schedule that responds to how you did.
 
-**Status: functional prototype, not a store release.** The public app uses sample study cards, stores reviews locally, and starts in English. Switch to Brazilian Portuguese to change the entire study experience without losing progress. See the [product plan](docs/product-plan.md).
+**Status: functional prototype, not a store release.** The public app uses sample, unreviewed study cards, stores reviews locally, and starts in English. Switch to Brazilian Portuguese to change the entire study experience without losing progress. See the [product plan](docs/product-plan.md).
+
+**AI grading, accounts and sync are not implemented.** The [grading-service plan](docs/grading-service-plan.md) is an unapproved draft; it must not be treated as a deployed service or permission for paid provider calls.
 
 ## Run locally
 
