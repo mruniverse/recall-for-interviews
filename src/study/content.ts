@@ -16,10 +16,10 @@ const isObject = (value: unknown): value is Record<string, unknown> =>
 /**
  * @param input Parsed `src/content/fixtures/deck.json`.
  * @returns The deck, typed after checking the fields the study flow relies on.
- * @throws StudyContentError when the deck is not a schema-1 deck of open and multiple-choice cards.
+ * @throws StudyContentError when the deck is not a schema-2 deck of open and multiple-choice cards.
  */
 export function parseFixtureDeck(input: unknown): Deck {
-  if (!isObject(input) || input.schemaVersion !== 1 || typeof input.deckId !== 'string') {
+  if (!isObject(input) || input.schemaVersion !== 2 || typeof input.deckId !== 'string') {
     throw new StudyContentError('Unsupported deck');
   }
   if (!Number.isSafeInteger(input.revision) || (input.revision as number) < 1 || !Array.isArray(input.cards)) {

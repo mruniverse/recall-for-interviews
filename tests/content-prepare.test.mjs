@@ -6,17 +6,20 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { cardContentHash } from '../src/content/deck.ts';
+import { approve, asSchemaOne, sampleDeck } from './content-support.mjs';
 
 const repo = fileURLToPath(new URL('..', import.meta.url));
 const sandbox = realpathSync(mkdtempSync(join(tmpdir(), 'recall-deck-')));
 test.after(() => rmSync(sandbox, { recursive: true, force: true }));
 
-// The pipeline runs from a disposable copy so tests never touch the real .generated/.
+// The pipeline runs from a disposable copy so tests never touch the real .generated/, and its
+// fixture deck is synthetic so these tests do not depend on the public sample content.
 const checkout = join(sandbox, 'checkout');
 cpSync(join(repo, 'scripts', 'prepare-deck.mjs'), join(checkout, 'scripts', 'prepare-deck.mjs'));
 cpSync(join(repo, 'src', 'content'), join(checkout, 'src', 'content'), { recursive: true });
+const fixtureFile = join(checkout, 'src', 'content', 'fixtures', 'deck.json');
+writeFileSync(fixtureFile, JSON.stringify(sampleDeck()));
 const output = join(checkout, '.generated', 'deck.json');
-const fixtures = () => JSON.parse(readFileSync(join(repo, 'src', 'content', 'fixtures', 'deck.json'), 'utf8'));
 
 function prepare(...args) {
   return spawnSync(process.execPath, ['--no-warnings', join(checkout, 'scripts', 'prepare-deck.mjs'), ...args], { encoding: 'utf8' });
@@ -28,20 +31,10 @@ function writeDeck(dir, deck) {
   return dir;
 }
 
-async function approvedDeck() {
-  const deck = fixtures();
-  for (const card of deck.cards) {
-    card.provenance.author = 'Author A';
-    card.review = {
-      status: 'approved',
-      reviewer: 'Reviewer B',
-      reviewedAt: '2026-11-20',
-      checks: ['accuracy', 'trade-offs', 'rubric'],
-      evidence: 'review-log.md#2026-11-20',
-      contentHash: await cardContentHash(card),
-    };
-  }
-  return deck;
+function writePrevious(name, deck) {
+  const file = join(sandbox, `${name}.json`);
+  writeFileSync(file, typeof deck === 'string' ? deck : JSON.stringify(deck));
+  return file;
 }
 
 // Each failure must also remove a bundle left by an earlier successful run.
@@ -59,13 +52,31 @@ test('the bundle path is ignored by git in the real checkout', () => {
   execFileSync('git', ['check-ignore', '--quiet', '--no-index', '.generated/deck.json'], { cwd: repo });
 });
 
-test('fixtures mode writes a bundle without provenance or review records', () => {
+test('fixtures mode writes a schema-2 bundle with both locales and without provenance or review records', () => {
   const run = prepare('--mode', 'fixtures');
   assert.equal(run.status, 0, run.stderr);
   const bundle = JSON.parse(readFileSync(output, 'utf8'));
-  assert.equal(bundle.mode, 'fixtures');
-  assert.deepEqual(bundle.cards.map((card) => card.id), fixtures().cards.map((card) => card.id));
-  assert.ok(bundle.cards.every((card) => !('provenance' in card) && !('review' in card)));
+  assert.deepEqual([bundle.schemaVersion, bundle.mode], [2, 'fixtures']);
+  assert.deepEqual(bundle.cards.map((card) => card.id), sampleDeck().cards.map((card) => card.id));
+  for (const card of bundle.cards) {
+    assert.ok(!('provenance' in card) && !('review' in card), card.id);
+    assert.deepEqual([typeof card.level, typeof card.round], ['string', 'string'], card.id);
+    assert.deepEqual(Object.keys(card.prompt).sort(), ['en', 'pt-BR'], card.id);
+  }
+});
+
+test('fixtures mode fails closed on a fixture deck that breaks the schema', () => {
+  const restore = readFileSync(fixtureFile, 'utf8');
+  try {
+    writeFileSync(fixtureFile, JSON.stringify(asSchemaOne(sampleDeck())));
+    assertFailsClosed(['--mode', 'fixtures'], /deck\.schemaVersion: must be 2/);
+    const long = sampleDeck();
+    long.cards[0].prompt['pt-BR'] = Array.from({ length: 31 }, () => 'palavra').join(' ');
+    writeFileSync(fixtureFile, JSON.stringify(long));
+    assertFailsClosed(['--mode', 'fixtures'], /card networking-open-1\.prompt\.pt-BR: has 31 words; the limit is 30/);
+  } finally {
+    writeFileSync(fixtureFile, restore);
+  }
 });
 
 test('the mode is explicit and unknown or misplaced arguments are rejected', () => {
@@ -77,17 +88,17 @@ test('the mode is explicit and unknown or misplaced arguments are rejected', () 
   assertFailsClosed(['--mode', 'private', '--deck', ''], /requires --deck/);
 });
 
-test('private mode accepts an approved deck outside the checkout and bundles no reviewer data', async () => {
-  const dir = writeDeck(join(sandbox, 'private-ok'), await approvedDeck());
+test('private mode accepts an approved, sourced deck outside the checkout and bundles no reviewer or source data', async () => {
+  const dir = writeDeck(join(sandbox, 'private-ok'), await approve(sampleDeck()));
   const run = prepare('--mode', 'private', '--deck', dir);
   assert.equal(run.status, 0, run.stderr);
   const text = readFileSync(output, 'utf8');
   assert.equal(JSON.parse(text).mode, 'private');
-  assert.ok(!text.includes('Reviewer B') && !text.includes('Author A') && !text.includes('review-log'));
+  for (const secret of ['Reviewer B', 'Author A', 'review-log', 'interview-reports', 'Example Corp']) assert.ok(!text.includes(secret), secret);
 });
 
 test('private mode requires a deck that exists outside the checkout after resolving symlinks', async () => {
-  const deck = await approvedDeck();
+  const deck = await approve(sampleDeck());
   const inside = writeDeck(join(checkout, 'private'), deck);
   symlinkSync(inside, join(sandbox, 'dir-link'));
   const fileLink = join(sandbox, 'file-link');
@@ -106,10 +117,11 @@ test('private mode requires a deck that exists outside the checkout after resolv
   assertFailsClosed(['--mode', 'private', '--deck', join(checkout, 'src', 'content', 'fixtures')], /must live outside this checkout/);
 });
 
-test('private mode fails closed on unreviewed or unreadable decks without echoing their content', () => {
-  const unreviewed = writeDeck(join(sandbox, 'unreviewed'), fixtures());
+test('private mode fails closed on unreviewed, unsourced or unreadable decks without echoing their content', () => {
+  const unreviewed = writeDeck(join(sandbox, 'unreviewed'), sampleDeck());
   const run = assertFailsClosed(['--mode', 'private', '--deck', unreviewed], /invalid deck \(24 problems\)/);
-  assert.match(run.stderr, /card net-l4-l7\.review: must be approved for a private release/);
+  assert.match(run.stderr, /card networking-open-1\.review: must be approved for a private release/);
+  assert.match(run.stderr, /card networking-open-1\.provenance\.sources: needs a question-pattern source/);
 
   const broken = writeDeck(join(sandbox, 'broken'), '{"cards": SECRET}');
   const failed = assertFailsClosed(['--mode', 'private', '--deck', broken], /deck is not readable JSON/);
@@ -125,22 +137,41 @@ test('a symlinked .generated directory is refused before anything is deleted or 
     const run = prepare('--mode', 'fixtures');
     assert.equal(run.status, 1);
     assert.match(run.stderr, /\.generated must be a directory, not a symlink/);
-    assert.deepEqual(JSON.parse(readFileSync(join(fixturesDir, 'deck.json'), 'utf8')), fixtures());
+    assert.deepEqual(JSON.parse(readFileSync(fixtureFile, 'utf8')), sampleDeck());
   } finally {
     rmSync(generated, { force: true });
   }
 });
 
 test('--previous rejects a kept id whose correct choice changed', async () => {
-  const previous = await approvedDeck();
-  const next = await approvedDeck();
+  const next = await approve(sampleDeck());
   next.revision = 2;
   const card = next.cards.find((c) => c.type === 'multiple-choice');
-  const wrong = card.choices.find((choice) => choice.id !== card.answer);
-  card.choices.find((choice) => choice.id === card.answer).reason = { 'pt-BR': 'Motivo' };
-  card.answer = wrong.id;
+  card.choices.find((choice) => choice.id === card.answer).reason = { en: 'Why not.', 'pt-BR': 'Por que não.' };
+  card.answer = card.choices.find((choice) => choice.id !== card.answer).id;
   card.review.contentHash = await cardContentHash(card);
-  writeFileSync(join(sandbox, 'previous.json'), JSON.stringify(previous));
+  const previous = writePrevious('previous', await approve(sampleDeck()));
   const dir = writeDeck(join(sandbox, 'next'), next);
-  assertFailsClosed(['--mode', 'private', '--deck', dir, '--previous', join(sandbox, 'previous.json')], new RegExp(`card ${card.id}: .* needs a new card id`));
+  assertFailsClosed(['--mode', 'private', '--deck', dir, '--previous', previous], new RegExp(`card ${card.id}: .* needs a new card id`));
+});
+
+test('--previous compares a schema-1 baseline safely and refuses one it cannot read', async () => {
+  const next = await approve(sampleDeck());
+  next.revision = 2;
+  const dir = writeDeck(join(sandbox, 'next-v2'), next);
+  const v1 = asSchemaOne(sampleDeck());
+
+  const run = prepare('--mode', 'private', '--deck', dir, '--previous', writePrevious('v1', v1));
+  assert.equal(run.status, 0, run.stderr);
+  assert.equal(JSON.parse(readFileSync(output, 'utf8')).revision, 2);
+
+  assertFailsClosed(['--mode', 'private', '--deck', dir, '--previous', writePrevious('v1-r2', { ...v1, revision: 2 })], /deck\.revision: must increase when content changes/);
+  const renamed = asSchemaOne(sampleDeck());
+  renamed.cards[0].id = 'networking-open-9';
+  assertFailsClosed(['--mode', 'private', '--deck', dir, '--previous', writePrevious('v1-renamed', renamed)], /card networking-open-9: a removed card must be listed in archived/);
+  assertFailsClosed(['--mode', 'private', '--deck', dir, '--previous', writePrevious('v3', { ...v1, schemaVersion: 3 })], /previous deck\.schemaVersion: only schema 1 or 2 can be compared; a reviewed migration is required first/);
+  assertFailsClosed(['--mode', 'private', '--deck', dir, '--previous', writePrevious('v1-broken', { ...v1, cards: 'SECRET' })], /previous deck\.cards: must be an array/);
+  const unreadable = assertFailsClosed(['--mode', 'private', '--deck', dir, '--previous', writePrevious('garbage', '{SECRET')], /previous deck is not readable JSON/);
+  assert.ok(!unreadable.stderr.includes('SECRET'));
+  assertFailsClosed(['--mode', 'private', '--deck', dir, '--previous', join(sandbox, 'absent.json')], /previous deck is not readable JSON/);
 });

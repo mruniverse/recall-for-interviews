@@ -146,6 +146,8 @@ const en = {
     networking: 'Networking',
     databases: 'Databases',
     algorithms: 'Algorithms',
+    cloud: 'Cloud',
+    tools: 'Tools',
   } satisfies Record<Topic, string>,
 };
 
@@ -244,6 +246,8 @@ const ptBR: Copy = {
     networking: 'Redes',
     databases: 'Bancos de dados',
     algorithms: 'Algoritmos',
+    cloud: 'Nuvem',
+    tools: 'Ferramentas',
   },
 };
 

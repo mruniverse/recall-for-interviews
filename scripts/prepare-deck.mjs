@@ -1,12 +1,13 @@
 // Validates a deck and writes the app bundle to .generated/deck.json (git-ignored).
 //   node scripts/prepare-deck.mjs --mode fixtures
 //   node scripts/prepare-deck.mjs --mode private --deck <directory outside this checkout> [--previous <deck.json>]
+// --previous is the shipped deck (schema 1 or 2); kept ids must keep their meaning against it.
 // Any failure exits 1 and leaves no bundle behind, so a build cannot ship a stale deck.
 import { lstatSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
-import { checkRevision, toBundle, validateDeck } from '../src/content/deck.ts';
+import { checkRevision, parseBaseline, toBundle, validateDeck } from '../src/content/deck.ts';
 
 const checkout = realpathSync.native(fileURLToPath(new URL('..', import.meta.url)));
 const fixtures = join(checkout, 'src', 'content', 'fixtures', 'deck.json');
@@ -49,7 +50,7 @@ async function main() {
   if (mode === 'fixtures' && deck !== undefined) throw new Error('--deck is only accepted with --mode private');
 
   const validated = await validateDeck(readJson(mode === 'private' ? privateDeckFile(deck) : fixtures, 'deck'), { mode });
-  if (previous !== undefined) checkRevision(await validateDeck(readJson(previous, 'previous deck'), { mode }), validated);
+  if (previous !== undefined) checkRevision(await parseBaseline(readJson(previous, 'previous deck'), { mode }), validated);
   writeFileSync(output, `${JSON.stringify(toBundle(validated, mode), null, 2)}\n`, { flag: 'wx' });
   console.log(`prepare-deck: ${mode} deck ${validated.deckId} r${validated.revision}, ${validated.cards.length} cards -> .generated/deck.json`);
 }

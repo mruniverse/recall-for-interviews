@@ -1,62 +1,73 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "deckId": "recall-sample",
-  "revision": 1,
+  "revision": 2,
   "archived": [],
   "cards": [
     {
       "id": "sd-cache-aside",
       "topic": "system-design",
+      "level": "mid",
+      "round": "system-design",
       "type": "open",
       "prompt": {
-        "en": "Your service reads product data through a cache-aside layer in front of the database. How can a reader see stale data, and how would you bound it?"
+        "en": "Products are read through a cache-aside layer in front of a database. How can readers see stale data, and how would you bound it?",
+        "pt-BR": "Seu serviço lê dados de produtos por meio de uma camada cache-aside na frente do banco de dados. Como um leitor pode ver dados desatualizados, e como você limitaria isso?"
       },
       "reference": {
-        "en": "In cache-aside, the application reads the cache first; on a miss it reads the database and stores the result in the cache. A reader sees stale data when the database changes but the cached entry survives until it expires or is invalidated. A race can also put an old value back: a reader misses and loads the old row, the writer commits and deletes the key, then the reader stores its old value in the cache. Bound staleness with a TTL that matches the tolerated delay and by deleting the key after the database write commits; use versioned values or short leases when a late write-back must not win. Tighter bounds lower the hit rate and increase database load."
+        "en": "The app reads the cache, then the database on a miss, and fills the cache. A database update leaves the entry stale until it expires or is invalidated. Bound staleness with a TTL and by deleting the key after the write commits. A slow reader can still write an old value back; versioned values or short leases prevent that.",
+        "pt-BR": "Na cache-aside, a aplicação consulta o cache; em um miss, lê o banco e preenche o cache. Uma atualização no banco deixa a entrada desatualizada até ela expirar ou ser invalidada. Limite isso com um TTL e apagando a chave depois do commit da escrita. Um leitor lento ainda pode regravar um valor antigo; valores versionados ou leases curtos impedem isso."
       },
       "checklist": [
         {
           "id": "read-path",
           "required": true,
           "text": {
-            "en": "Describes the read path: check the cache, read the database on a miss, then populate the cache."
+            "en": "Describes the read path: check the cache, read the database on a miss, then populate the cache.",
+            "pt-BR": "Descreve o caminho de leitura: consultar o cache, ler o banco quando a chave não está no cache e então preencher o cache."
           }
         },
         {
           "id": "stale-source",
           "required": true,
           "text": {
-            "en": "Explains that a database update leaves the cached entry stale until it expires or is invalidated."
+            "en": "Explains that a database update leaves the cached entry stale until it expires or is invalidated.",
+            "pt-BR": "Explica que uma atualização no banco deixa a entrada em cache desatualizada até ela expirar ou ser invalidada."
           }
         },
         {
           "id": "bound",
           "required": true,
           "text": {
-            "en": "Proposes a TTL and/or deleting the key after the database write commits."
+            "en": "Proposes a TTL and/or deleting the key after the database write commits.",
+            "pt-BR": "Propõe um TTL e/ou apagar a chave depois do commit da escrita no banco."
           }
         },
         {
           "id": "race",
           "required": false,
           "text": {
-            "en": "Describes the race in which a slow reader writes an old value back after invalidation."
+            "en": "Describes the race in which a slow reader writes an old value back after invalidation.",
+            "pt-BR": "Descreve a condição de corrida em que um leitor lento regrava um valor antigo depois da invalidação."
           }
         },
         {
           "id": "trade-off",
           "required": false,
           "text": {
-            "en": "Names the trade-off between freshness and hit rate or database load."
+            "en": "Names the trade-off between freshness and hit rate or database load.",
+            "pt-BR": "Aponta a troca entre dados mais atualizados e a taxa de acerto do cache ou a carga no banco."
           }
         }
       ],
       "explanation": {
+        "en": "In cache-aside, the application itself fills and invalidates the cache, so the database and the cache are updated in separate steps. The TTL sets the maximum time data can stay stale; deleting the key after the commit shortens that window but does not eliminate the race in which a slow read writes the old value back. Versions or leases solve that case, at the cost of more complexity.",
         "pt-BR": "No cache-aside, a aplicação é quem preenche e invalida o cache, então banco e cache são atualizados em passos separados. O TTL define o tempo máximo de dado desatualizado; apagar a chave depois do commit encurta essa janela, mas não elimina a corrida em que uma leitura lenta regrava o valor antigo. Versões ou leases resolvem esse caso, ao custo de mais complexidade."
       },
       "provenance": {
         "origin": "original",
-        "author": "ai-assisted-draft"
+        "author": "ai-assisted-draft",
+        "sources": []
       },
       "review": {
         "status": "unreviewed"
@@ -65,56 +76,67 @@
     {
       "id": "sd-rate-limit",
       "topic": "system-design",
+      "level": "mid",
+      "round": "system-design",
       "type": "open",
       "prompt": {
-        "en": "Design a limit of 100 requests per minute per user for an API served by several stateless instances. Where does the counter live, and what trade-off does your algorithm make?"
+        "en": "Limit each user to 100 requests per minute across several stateless instances. Where does the counter live, and what trade-off does your algorithm make?",
+        "pt-BR": "Projete um limite de 100 requisições por minuto por usuário em uma API com várias instâncias sem estado. Onde fica o contador, e o que o algoritmo sacrifica?"
       },
       "reference": {
-        "en": "Because the instances are stateless and one user's requests can reach any of them, the counter must live in a shared, low-latency store such as Redis, keyed by user and updated atomically (for example INCR with an expiry, or a script that checks and increments in one step). A fixed window is cheap but allows up to twice the limit across a window boundary; a sliding-window log is exact but stores one timestamp per request; a sliding-window counter or a token bucket smooths bursts with constant memory per user. Decide what happens when the store is unavailable: failing open keeps the API available, failing closed protects the backend. Reject with HTTP 429 and a Retry-After header."
+        "en": "Keep the counter per user in shared storage, such as Redis, updated atomically. A fixed window is cheap but allows double the limit at a boundary; a sliding log is exact but stores a timestamp per request; a token bucket smooths bursts in constant memory. Choose fail-open or fail-closed when the store is down. Reject with HTTP 429 and Retry-After.",
+        "pt-BR": "O contador por usuário fica em um armazenamento compartilhado de baixa latência, como o Redis, com atualização atômica. A janela fixa é barata, mas permite o dobro do limite na virada; o log deslizante é exato, mas guarda um horário por requisição; o token bucket suaviza rajadas com memória constante. Decida se falha aberta ou fechada quando o armazenamento cair. Rejeite com HTTP 429 e Retry-After."
       },
       "checklist": [
         {
           "id": "shared-store",
           "required": true,
           "text": {
-            "en": "Keeps the counter in storage shared by all instances, not in each instance's memory."
+            "en": "Keeps the counter in storage shared by all instances, not in each instance's memory.",
+            "pt-BR": "Mantém o contador em um armazenamento compartilhado por todas as instâncias, e não na memória de cada uma."
           }
         },
         {
           "id": "atomic",
           "required": true,
           "text": {
-            "en": "Updates the counter atomically."
+            "en": "Updates the counter atomically.",
+            "pt-BR": "Atualiza o contador de forma atômica."
           }
         },
         {
           "id": "algorithm",
           "required": true,
           "text": {
-            "en": "Names an algorithm and its accuracy or memory trade-off, such as the fixed-window boundary burst."
+            "en": "Names an algorithm and its accuracy or memory trade-off, such as the fixed-window boundary burst.",
+            "pt-BR": "Cita um algoritmo e sua troca entre precisão e memória, como a rajada na virada da janela fixa."
           }
         },
         {
           "id": "store-failure",
           "required": false,
           "text": {
-            "en": "Chooses fail-open or fail-closed behavior when the store is unavailable."
+            "en": "Chooses fail-open or fail-closed behavior when the store is unavailable.",
+            "pt-BR": "Escolhe entre falhar aberto ou falhar fechado quando o armazenamento estiver indisponível."
           }
         },
         {
           "id": "response",
           "required": false,
           "text": {
-            "en": "Responds with HTTP 429 and Retry-After."
+            "en": "Responds with HTTP 429 and Retry-After.",
+            "pt-BR": "Responde com HTTP 429 e Retry-After."
           }
         }
       ],
       "explanation": {
+        "en": "With counters in local memory, each instance would enforce the limit separately and the user could get 100 requests per instance. A shared store with atomic updates prevents two instances from reading the same value and both accepting the request. The choice of algorithm trades accuracy for memory: the fixed window accepts bursts of up to twice the limit at the window boundary, while the token bucket smooths bursts with constant memory.",
         "pt-BR": "Com contadores em memória local, cada instância aplicaria o limite separadamente e o usuário conseguiria 100 requisições por instância. Um armazenamento compartilhado com atualização atômica evita que duas instâncias leiam o mesmo valor e ambas aceitem a requisição. A escolha do algoritmo troca precisão por memória: a janela fixa aceita rajadas de até o dobro na virada da janela, enquanto o token bucket suaviza as rajadas com memória constante."
       },
       "provenance": {
         "origin": "original",
-        "author": "ai-assisted-draft"
+        "author": "ai-assisted-draft",
+        "sources": []
       },
       "review": {
         "status": "unreviewed"
@@ -123,56 +145,67 @@
     {
       "id": "sd-idempotency",
       "topic": "system-design",
+      "level": "mid",
+      "round": "system-design",
       "type": "open",
       "prompt": {
-        "en": "A mobile app retries a \"create payment\" request after a timeout. How do you make sure the customer is charged only once?"
+        "en": "A mobile app retries a \"create payment\" request after a timeout. How do you make sure the customer is charged only once?",
+        "pt-BR": "Um app móvel repete uma requisição de \"criar pagamento\" depois de um timeout. Como garantir que o cliente seja cobrado só uma vez?"
       },
       "reference": {
-        "en": "A timeout does not tell the client whether the first request was processed, so retries must be safe. The client generates an idempotency key for the logical operation and sends the same key on every retry. The server records the key, a fingerprint of the request and the outcome in the same transaction as the payment, enforced by a unique constraint. A retry with a known key returns the stored outcome instead of charging again; the same key with a different payload is rejected. Concurrent duplicates are serialized by the constraint or a lock, and keys are kept longer than the client's retry window."
+        "en": "The client sends one idempotency key per operation, reused on every retry. The server stores the key, a request fingerprint and the outcome in the charge's transaction, under a unique constraint that also serializes concurrent duplicates. A retry with a known key returns the stored outcome; a different payload under that key is rejected. Keep keys past the retry window.",
+        "pt-BR": "O cliente envia uma chave de idempotência por operação e a repete em toda tentativa. O servidor grava a chave, a impressão digital da requisição e o resultado na transação da cobrança, com restrição de unicidade que também serializa duplicatas concorrentes. Uma tentativa com chave conhecida devolve o resultado guardado; outro conteúdo com a mesma chave é rejeitado. Mantenha as chaves além da janela de novas tentativas."
       },
       "checklist": [
         {
           "id": "client-key",
           "required": true,
           "text": {
-            "en": "The client sends the same idempotency key on every retry of one operation."
+            "en": "The client sends the same idempotency key on every retry of one operation.",
+            "pt-BR": "O app envia a mesma chave de idempotência em toda nova tentativa de uma mesma operação."
           }
         },
         {
           "id": "atomic-record",
           "required": true,
           "text": {
-            "en": "The server stores the key and outcome atomically with the charge, for example under a unique constraint."
+            "en": "The server stores the key and outcome atomically with the charge, for example under a unique constraint.",
+            "pt-BR": "O servidor grava a chave e o resultado de forma atômica com a cobrança, por exemplo sob uma restrição de unicidade."
           }
         },
         {
           "id": "replay",
           "required": true,
           "text": {
-            "en": "A retry with a known key returns the original outcome without a second charge."
+            "en": "A retry with a known key returns the original outcome without a second charge.",
+            "pt-BR": "Uma nova tentativa com uma chave conhecida devolve o resultado original sem uma segunda cobrança."
           }
         },
         {
           "id": "payload-mismatch",
           "required": false,
           "text": {
-            "en": "Rejects reuse of a key with a different request payload."
+            "en": "Rejects reuse of a key with a different request payload.",
+            "pt-BR": "Rejeita o reúso de uma chave com dados de requisição diferentes."
           }
         },
         {
           "id": "concurrency",
           "required": false,
           "text": {
-            "en": "Handles concurrent duplicates and defines how long keys are kept."
+            "en": "Handles concurrent duplicates and defines how long keys are kept.",
+            "pt-BR": "Trata duplicatas concorrentes e define por quanto tempo as chaves são mantidas."
           }
         }
       ],
       "explanation": {
+        "en": "A timeout does not mean failure: the first request may have been charged and only the response was lost. The idempotency key turns the retry into a lookup of the outcome already recorded. It only protects you if it is recorded in the same transaction as the charge; recording it afterwards leaves a window in which a failure between the two steps causes a double charge.",
         "pt-BR": "Timeout não significa falha: o primeiro pedido pode ter sido cobrado e só a resposta se perdeu. A chave de idempotência transforma a repetição em uma consulta ao resultado já gravado. Ela só protege se for registrada na mesma transação da cobrança; gravá-la depois deixa uma janela em que uma falha entre os dois passos gera cobrança dupla."
       },
       "provenance": {
         "origin": "original",
-        "author": "ai-assisted-draft"
+        "author": "ai-assisted-draft",
+        "sources": []
       },
       "review": {
         "status": "unreviewed"
@@ -181,56 +214,67 @@
     {
       "id": "sd-backpressure",
       "topic": "system-design",
+      "level": "mid",
+      "round": "system-design",
       "type": "open",
       "prompt": {
-        "en": "An upload service publishes image-processing jobs to a queue. For several hours, producers add jobs faster than workers finish them. What happens, and how do you respond?"
+        "en": "An upload service queues image jobs. For hours, producers add jobs faster than workers finish them. What happens, and how do you respond?",
+        "pt-BR": "Um serviço de upload enfileira tarefas de imagem. Por horas, os produtores adicionam tarefas mais rápido do que os workers as concluem. O que acontece, e como você reage?"
       },
       "reference": {
-        "en": "Queue depth grows without bound, so every new job waits longer; the broker can run out of memory or disk, and messages may expire or be dropped. If workers are the bottleneck and downstream dependencies have headroom, add consumers. If they do not, apply backpressure at the producer: cap the queue and reject or defer new uploads with a retryable error, or degrade by doing the cheapest work first. Alert and autoscale on queue depth and the age of the oldest message rather than on CPU alone. Keep workers idempotent, because redeliveries increase under load."
+        "en": "Queue depth grows without bound, and the broker may exhaust memory or drop messages. If workers are the bottleneck and downstream has headroom, add consumers; otherwise apply backpressure at the producer: cap the queue and defer uploads with a retryable error. Alert and autoscale on queue depth and oldest-message age. Keep workers idempotent, since redeliveries rise.",
+        "pt-BR": "A fila e a latência crescem sem limite, e o broker pode ficar sem memória ou descartar mensagens. Se os workers forem o gargalo e as dependências tiverem folga, adicione consumidores; senão, aplique backpressure no produtor: limite a fila e rejeite ou adie uploads com erro repetível. Alerte e escale pela profundidade da fila e pela idade da mensagem mais antiga. Mantenha os workers idempotentes, pois as reentregas aumentam."
       },
       "checklist": [
         {
           "id": "growth",
           "required": true,
           "text": {
-            "en": "Recognizes unbounded growth of queue depth and job latency."
+            "en": "Recognizes unbounded growth of queue depth and job latency.",
+            "pt-BR": "Reconhece o crescimento sem limite do tamanho da fila e da latência das tarefas."
           }
         },
         {
           "id": "consumers",
           "required": true,
           "text": {
-            "en": "Proposes adding consumers while checking downstream capacity."
+            "en": "Proposes adding consumers while checking downstream capacity.",
+            "pt-BR": "Propõe adicionar consumidores verificando a capacidade dos serviços a jusante."
           }
         },
         {
           "id": "backpressure",
           "required": true,
           "text": {
-            "en": "Proposes backpressure or load shedding at the producer."
+            "en": "Proposes backpressure or load shedding at the producer.",
+            "pt-BR": "Propõe backpressure ou descarte de carga no produtor."
           }
         },
         {
           "id": "signals",
           "required": false,
           "text": {
-            "en": "Monitors or autoscales on queue depth or oldest-message age."
+            "en": "Monitors or autoscales on queue depth or oldest-message age.",
+            "pt-BR": "Monitora ou escala automaticamente pelo tamanho da fila ou pela idade da mensagem mais antiga."
           }
         },
         {
           "id": "idempotent",
           "required": false,
           "text": {
-            "en": "Keeps consumers idempotent because redeliveries increase."
+            "en": "Keeps consumers idempotent because redeliveries increase.",
+            "pt-BR": "Mantém os consumidores idempotentes, porque as reentregas aumentam."
           }
         }
       ],
       "explanation": {
+        "en": "A queue absorbs short spikes, but it does not fix an incoming rate higher than the outgoing rate for hours. More consumers only help if the worker itself is the bottleneck; if the database or another downstream service is at its limit, adding consumers makes things worse. Backpressure hands the problem back to the producer explicitly, instead of letting the queue grow until it fails.",
         "pt-BR": "Uma fila absorve picos curtos, mas não corrige uma vazão de entrada maior que a de saída durante horas. Mais consumidores só ajudam se o gargalo for o próprio worker; se o banco ou outro serviço a jusante estiver no limite, aumentar consumidores piora a situação. Backpressure devolve o problema ao produtor de forma explícita, em vez de deixar a fila crescer até falhar."
       },
       "provenance": {
         "origin": "original",
-        "author": "ai-assisted-draft"
+        "author": "ai-assisted-draft",
+        "sources": []
       },
       "review": {
         "status": "unreviewed"
@@ -239,52 +283,64 @@
     {
       "id": "sd-consistent-hashing",
       "topic": "system-design",
+      "level": "mid",
+      "round": "system-design",
       "type": "multiple-choice",
       "prompt": {
-        "en": "Why assign keys to N cache nodes with consistent hashing instead of hash(key) % N?"
+        "en": "Why assign keys to N cache nodes with consistent hashing instead of hash(key) % N?",
+        "pt-BR": "Por que distribuir chaves entre N nós de cache com hashing consistente em vez de hash(key) % N?"
       },
       "choices": [
         {
           "id": "a",
           "text": {
-            "en": "It guarantees that every node stores exactly the same number of keys."
+            "en": "It guarantees equal key counts on every node.",
+            "pt-BR": "Garante que todos os nós armazenem exatamente o mesmo número de chaves."
           },
           "reason": {
+            "en": "Without virtual nodes the distribution can be quite uneven; with them the balance improves, but it remains approximate.",
             "pt-BR": "Sem nós virtuais a distribuição pode ficar bem desigual; com eles o equilíbrio melhora, mas continua aproximado."
           }
         },
         {
           "id": "b",
           "text": {
-            "en": "Adding or removing a node remaps only about 1/N of the keys instead of most of them."
+            "en": "Adding or removing a node remaps only about 1/N of keys.",
+            "pt-BR": "Adicionar ou remover um nó remapeia só cerca de 1/N das chaves."
           }
         },
         {
           "id": "c",
           "text": {
-            "en": "It removes the need to replicate data across nodes."
+            "en": "It removes the need to replicate data across nodes.",
+            "pt-BR": "Elimina a necessidade de replicar dados entre os nós."
           },
           "reason": {
+            "en": "Hashing only decides where each key lives; surviving the loss of a node still requires replicas.",
             "pt-BR": "O hashing só decide onde cada chave fica; sobreviver à perda de um nó ainda exige réplicas."
           }
         },
         {
           "id": "d",
           "text": {
-            "en": "Its lookups are O(1), while modulo hashing needs O(log N)."
+            "en": "Its lookups are O(1), while modulo hashing needs O(log N).",
+            "pt-BR": "Suas buscas são O(1), e o módulo precisa de O(log N)."
           },
           "reason": {
+            "en": "Modulo is O(1); a lookup on the ring is usually a binary search, O(log N) over the points on the ring.",
             "pt-BR": "O módulo é O(1); a busca no anel costuma ser uma busca binária, O(log N) nos pontos do anel."
           }
         }
       ],
       "answer": "b",
       "explanation": {
+        "en": "With modulo, changing N changes the destination of almost every key, and the cache is practically emptied at once. On a consistent hashing ring, each node owns a segment; when a node joins or leaves, only the keys in that segment move, about 1/N of the total.",
         "pt-BR": "Com módulo, mudar N altera o destino de quase todas as chaves e o cache praticamente se esvazia de uma vez. No anel de hash consistente, cada nó responde por um trecho; quando um nó entra ou sai, só as chaves desse trecho mudam de lugar, cerca de 1/N do total."
       },
       "provenance": {
         "origin": "original",
-        "author": "ai-assisted-draft"
+        "author": "ai-assisted-draft",
+        "sources": []
       },
       "review": {
         "status": "unreviewed"
@@ -293,52 +349,64 @@
     {
       "id": "sd-partition-writes",
       "topic": "system-design",
+      "level": "mid",
+      "round": "system-design",
       "type": "multiple-choice",
       "prompt": {
-        "en": "During a network partition, a replicated key-value store keeps accepting writes on both sides and reconciles them later. Which guarantee did it give up?"
+        "en": "During a network partition, a replicated key-value store keeps accepting writes on both sides and reconciles them later. Which guarantee did it give up?",
+        "pt-BR": "Durante uma partição de rede, um armazenamento chave-valor replicado continua aceitando escritas dos dois lados e as reconcilia depois. De qual garantia ele abriu mão?"
       },
       "choices": [
         {
           "id": "a",
           "text": {
-            "en": "Availability"
+            "en": "Availability",
+            "pt-BR": "Disponibilidade"
           },
           "reason": {
+            "en": "Accepting writes on both sides is precisely how the system stays available during the partition.",
             "pt-BR": "Aceitar escritas dos dois lados é justamente manter a disponibilidade durante a partição."
           }
         },
         {
           "id": "b",
           "text": {
-            "en": "Partition tolerance"
+            "en": "Partition tolerance",
+            "pt-BR": "Tolerância a partição"
           },
           "reason": {
+            "en": "The system keeps operating while the network is split; that is what partition tolerance describes.",
             "pt-BR": "O sistema continua operando com a rede dividida; é isso que tolerância a partição descreve."
           }
         },
         {
           "id": "c",
           "text": {
-            "en": "Linearizable consistency"
+            "en": "Linearizable consistency",
+            "pt-BR": "Consistência linearizável"
           }
         },
         {
           "id": "d",
           "text": {
-            "en": "Horizontal scalability"
+            "en": "Horizontal scalability",
+            "pt-BR": "Escalabilidade horizontal"
           },
           "reason": {
+            "en": "Horizontal scalability is not part of the CAP theorem and is not affected by the choice described.",
             "pt-BR": "Escalabilidade horizontal não faz parte do teorema CAP e não é afetada pela escolha descrita."
           }
         }
       ],
       "answer": "c",
       "explanation": {
+        "en": "Under the CAP theorem, during a partition the system chooses between always responding (availability) and guaranteeing that every read sees the most recent write (linearizable consistency). Accepting writes on both sides and reconciling later is the AP choice: readers may see divergent values until reconciliation, and the resolution rule may discard one of the writes.",
         "pt-BR": "Pelo teorema CAP, durante uma partição o sistema escolhe entre responder sempre (disponibilidade) e garantir que toda leitura veja a escrita mais recente (consistência linearizável). Aceitar escritas nos dois lados e reconciliar depois é a escolha AP: leitores podem ver valores divergentes até a reconciliação, e a regra de resolução pode descartar uma das escritas."
       },
       "provenance": {
         "origin": "original",
-        "author": "ai-assisted-draft"
+        "author": "ai-assisted-draft",
+        "sources": []
       },
       "review": {
         "status": "unreviewed"
@@ -347,56 +415,67 @@
     {
       "id": "net-l4-l7",
       "topic": "networking",
+      "level": "mid",
+      "round": "fundamentals",
       "type": "open",
       "prompt": {
-        "en": "When would a Layer 7 load balancer be a better choice than a Layer 4 one? Name a trade-off."
+        "en": "When would a Layer 7 load balancer be a better choice than a Layer 4 one? Name a trade-off.",
+        "pt-BR": "Quando um balanceador de carga de camada 7 seria uma escolha melhor que um de camada 4? Cite uma contrapartida."
       },
       "reference": {
-        "en": "A Layer 7 load balancer terminates the application protocol, usually HTTP, so it can route by host, path, header or cookie, retry idempotent requests, and apply per-route policies such as authentication or rate limits. Choose it when routing depends on request content, for example sending /api and /static to different services or sending requests with a canary header to a new version. A Layer 4 load balancer forwards TCP or UDP connections by address and port without parsing the payload, so it adds less latency, works with any protocol and can pass TLS through to the backend. The trade-off: Layer 7 costs more CPU and latency, must hold certificates when it terminates TLS, and is one more component that has to understand the protocol correctly."
+        "en": "Layer 7 reads HTTP, so it routes by host, path, header or cookie, such as /api versus /static or a canary header. Layer 4 forwards TCP or UDP by address and port without reading the payload, adding less latency and passing TLS through. The trade-off: Layer 7 costs more CPU and latency and must hold certificates to terminate TLS.",
+        "pt-BR": "A camada 7 termina o HTTP, então roteia por host, caminho, cabeçalho ou cookie, por exemplo /api versus /static ou um cabeçalho de canário. A camada 4 encaminha conexões TCP ou UDP por endereço e porta, sem ler o conteúdo: adiciona menos latência, aceita qualquer protocolo e pode repassar o TLS intacto. A contrapartida: a camada 7 gasta mais CPU e latência e precisa guardar os certificados ao terminar o TLS."
       },
       "checklist": [
         {
           "id": "l7-routing",
           "required": true,
           "text": {
-            "en": "States that Layer 7 can route on request content such as host, path, headers or cookies."
+            "en": "States that Layer 7 can route on request content such as host, path, headers or cookies.",
+            "pt-BR": "Afirma que a camada 7 pode rotear pelo conteúdo da requisição, como host, caminho, cabeçalhos ou cookies."
           }
         },
         {
           "id": "l4-forwarding",
           "required": true,
           "text": {
-            "en": "States that Layer 4 forwards connections by address and port without inspecting the payload."
+            "en": "States that Layer 4 forwards connections by address and port without inspecting the payload.",
+            "pt-BR": "Afirma que a camada 4 encaminha conexões por endereço e porta sem inspecionar o conteúdo."
           }
         },
         {
           "id": "trade-off",
           "required": true,
           "text": {
-            "en": "Names a trade-off, such as Layer 7's extra CPU and latency or its need to terminate TLS."
+            "en": "Names a trade-off, such as Layer 7's extra CPU and latency or its need to terminate TLS.",
+            "pt-BR": "Cita uma contrapartida, como o custo extra de CPU e latência da camada 7 ou a necessidade de terminar o TLS."
           }
         },
         {
           "id": "protocols",
           "required": false,
           "text": {
-            "en": "Mentions that Layer 4 handles arbitrary TCP/UDP protocols or TLS passthrough."
+            "en": "Mentions that Layer 4 handles arbitrary TCP/UDP protocols or TLS passthrough.",
+            "pt-BR": "Menciona que a camada 4 lida com protocolos TCP/UDP arbitrários ou repassa o TLS sem terminá-lo."
           }
         },
         {
           "id": "use-case",
           "required": false,
           "text": {
-            "en": "Gives a concrete Layer 7 use case, such as path-based routing or a header-based canary."
+            "en": "Gives a concrete Layer 7 use case, such as path-based routing or a header-based canary.",
+            "pt-BR": "Dá um caso de uso concreto da camada 7, como roteamento por caminho ou canário por cabeçalho."
           }
         }
       ],
       "explanation": {
+        "en": "The difference lies in what the load balancer sees. At Layer 4 it sees only addresses and ports, so it decides per connection and does not know which route was requested. At Layer 7 it reads the HTTP request and can decide by path, header or cookie. That visibility costs processing, latency and the responsibility of terminating TLS.",
         "pt-BR": "A diferença está no que o balanceador enxerga. Na camada 4 ele vê apenas endereços e portas, então decide por conexão e não sabe qual rota foi pedida. Na camada 7 ele lê a requisição HTTP e pode decidir por caminho, cabeçalho ou cookie. Essa visibilidade custa processamento, latência e a responsabilidade de terminar o TLS."
       },
       "provenance": {
         "origin": "original",
-        "author": "ai-assisted-draft"
+        "author": "ai-assisted-draft",
+        "sources": []
       },
       "review": {
         "status": "unreviewed"
@@ -405,63 +484,75 @@
     {
       "id": "net-connection-setup",
       "topic": "networking",
+      "level": "mid",
+      "round": "fundamentals",
       "type": "open",
       "prompt": {
-        "en": "Why can a new HTTPS connection take several round trips before the first response byte arrives, and how can you reduce that cost?"
+        "en": "Why can a new HTTPS connection take several round trips before the first response byte arrives, and how can you reduce that cost?",
+        "pt-BR": "Por que uma nova conexão HTTPS pode levar várias idas e voltas antes de chegar o primeiro byte da resposta, e como reduzir esse custo?"
       },
       "reference": {
-        "en": "Before the request is sent, the client may need a DNS lookup, then the TCP three-way handshake (one round trip before data can be sent), then the TLS handshake (one round trip with TLS 1.3, two with TLS 1.2). Only then does the request go out and the response come back. On a mobile network each round trip can cost tens to hundreds of milliseconds. Reduce the cost by reusing connections (keep-alive, HTTP/2 multiplexing), resuming TLS sessions, using 0-RTT only for requests that are safe to replay, adopting HTTP/3 over QUIC, which combines the transport and TLS handshakes, caching DNS results, and terminating connections closer to users through a CDN."
+        "en": "Before the first byte: DNS lookup, the TCP handshake (one round trip), then the TLS handshake (one round trip in TLS 1.3, two in TLS 1.2). Reduce this by reusing connections, resuming TLS sessions, caching DNS, using HTTP/3 over QUIC to merge transport and TLS handshakes, and terminating near users through a CDN. Use 0-RTT only for replay-safe requests.",
+        "pt-BR": "Antes do primeiro byte: consulta DNS, handshake TCP (uma ida e volta) e handshake TLS (uma ida e volta no TLS 1.3, duas no TLS 1.2). Reduza isso reutilizando conexões, retomando sessões TLS, guardando DNS em cache, usando HTTP/3 sobre QUIC, que une os handshakes de transporte e TLS, e terminando perto do usuário em um CDN. Use 0-RTT só em requisições seguras para repetir."
       },
       "checklist": [
         {
           "id": "tcp",
           "required": true,
           "text": {
-            "en": "Identifies the TCP handshake as a round trip before the request can be sent."
+            "en": "Identifies the TCP handshake as a round trip before the request can be sent.",
+            "pt-BR": "Identifica o handshake TCP como uma ida e volta antes que a requisição possa ser enviada."
           }
         },
         {
           "id": "tls",
           "required": true,
           "text": {
-            "en": "Identifies the additional TLS handshake round trip(s)."
+            "en": "Identifies the additional TLS handshake round trip(s).",
+            "pt-BR": "Identifica a ida e volta adicional (ou as duas) do handshake TLS."
           }
         },
         {
           "id": "reuse",
           "required": true,
           "text": {
-            "en": "Proposes reusing or resuming connections so handshakes are not repeated."
+            "en": "Proposes reusing or resuming connections so handshakes are not repeated.",
+            "pt-BR": "Propõe reutilizar ou retomar conexões para que os handshakes não se repitam."
           }
         },
         {
           "id": "dns",
           "required": false,
           "text": {
-            "en": "Mentions DNS resolution before the connection."
+            "en": "Mentions DNS resolution before the connection.",
+            "pt-BR": "Menciona a resolução DNS antes da conexão."
           }
         },
         {
           "id": "quic-edge",
           "required": false,
           "text": {
-            "en": "Mentions HTTP/3 (QUIC) or edge termination to remove round trips or shorten them."
+            "en": "Mentions HTTP/3 (QUIC) or edge termination to remove round trips or shorten them.",
+            "pt-BR": "Menciona HTTP/3 (QUIC) ou terminação na borda para eliminar ou encurtar idas e voltas."
           }
         },
         {
           "id": "replay",
           "required": false,
           "text": {
-            "en": "Notes that 0-RTT data can be replayed, so it suits only safe requests."
+            "en": "Notes that 0-RTT data can be replayed, so it suits only safe requests.",
+            "pt-BR": "Observa que dados 0-RTT podem ser reenviados por um atacante, então só servem para requisições seguras."
           }
         }
       ],
       "explanation": {
+        "en": "Each handshake costs at least one full round trip over the network, and on mobile networks latency dominates response time. Reusing the connection eliminates the subsequent handshakes; HTTP/3 merges transport and TLS into a single handshake; and a CDN shortens the physical distance of each round trip. 0-RTT saves one more round trip, but that early data can be resent by an attacker.",
         "pt-BR": "Cada handshake custa pelo menos uma ida e volta completa pela rede, e em redes móveis a latência domina o tempo de resposta. Reutilizar a conexão elimina os handshakes seguintes; o HTTP/3 junta transporte e TLS em um único handshake; e um CDN encurta a distância física de cada ida e volta. O 0-RTT economiza mais uma volta, mas esses dados iniciais podem ser reenviados por um atacante."
       },
       "provenance": {
         "origin": "original",
-        "author": "ai-assisted-draft"
+        "author": "ai-assisted-draft",
+        "sources": []
       },
       "review": {
         "status": "unreviewed"
@@ -470,56 +561,67 @@
     {
       "id": "net-dns-ttl",
       "topic": "networking",
+      "level": "mid",
+      "round": "fundamentals",
       "type": "open",
       "prompt": {
-        "en": "Tomorrow you will point a domain at a new load balancer IP. How does the DNS TTL affect the cutover, and what would you do beforehand?"
+        "en": "You will point a domain at a new load balancer tomorrow. How does the DNS TTL affect the cutover, and what would you do beforehand?",
+        "pt-BR": "Amanhã você vai apontar um domínio para o IP de um novo balanceador de carga. Como o TTL do DNS afeta a migração, e o que você faria antes?"
       },
       "reference": {
-        "en": "Resolvers cache the record for its TTL, so after the change some clients keep using the old IP until their cached copy expires; with a 24-hour TTL, traffic can be split for up to a day. Lower the TTL, for example to 60 seconds, at least one old TTL before the migration so caches pick up the short value. Keep the old endpoint serving or proxying during the overlap, switch the record, and raise the TTL again once the new endpoint is stable. Some clients and resolvers ignore or clamp TTLs, so watch traffic on the old IP before shutting it down."
+        "en": "Resolvers cache records for the TTL, so after the switch some clients keep the old IP until it expires. Lower the TTL, for example to 60 seconds, at least one old TTL early. Keep the old endpoint serving during the overlap, switch the record, then raise the TTL once stable. Some clients ignore TTLs, so watch old-IP traffic before shutdown.",
+        "pt-BR": "Os resolvers guardam o registro pelo TTL, então alguns clientes mantêm o IP antigo até a cópia expirar. Reduza o TTL, por exemplo para 60 segundos, pelo menos um TTL antigo antes da mudança. Mantenha o endpoint antigo no ar durante a sobreposição, troque o registro e aumente o TTL de novo quando estável. Alguns clientes ignoram o TTL; monitore o IP antigo antes de desligá-lo."
       },
       "checklist": [
         {
           "id": "caching",
           "required": true,
           "text": {
-            "en": "Explains that resolvers cache the record for its TTL, so some clients keep the old IP until it expires."
+            "en": "Explains that resolvers cache the record for its TTL, so some clients keep the old IP until it expires.",
+            "pt-BR": "Explica que os resolvers guardam o registro em cache pelo tempo do TTL, então alguns clientes mantêm o IP antigo até ele expirar."
           }
         },
         {
           "id": "lower-early",
           "required": true,
           "text": {
-            "en": "Lowers the TTL ahead of time, at least one old TTL before the change."
+            "en": "Lowers the TTL ahead of time, at least one old TTL before the change.",
+            "pt-BR": "Reduz o TTL com antecedência, pelo menos um TTL antigo antes da mudança."
           }
         },
         {
           "id": "overlap",
           "required": true,
           "text": {
-            "en": "Keeps the old endpoint working during the overlap."
+            "en": "Keeps the old endpoint working during the overlap.",
+            "pt-BR": "Mantém o endpoint antigo funcionando durante a sobreposição."
           }
         },
         {
           "id": "stragglers",
           "required": false,
           "text": {
-            "en": "Notes that some clients ignore TTLs and checks old-IP traffic before decommissioning."
+            "en": "Notes that some clients ignore TTLs and checks old-IP traffic before decommissioning.",
+            "pt-BR": "Observa que alguns clientes ignoram o TTL e verifica o tráfego no IP antigo antes de desativá-lo."
           }
         },
         {
           "id": "restore",
           "required": false,
           "text": {
-            "en": "Raises the TTL again after the cutover."
+            "en": "Raises the TTL again after the cutover.",
+            "pt-BR": "Aumenta o TTL de novo depois da migração."
           }
         }
       ],
       "explanation": {
+        "en": "The TTL is how long a cached answer stays valid. Lowering it only on the day of the switch does not help: resolvers that already stored the record with a long TTL will only query it again when it expires. That is why the reduction must happen at least one old TTL in advance, and the old endpoint must keep serving while there is traffic.",
         "pt-BR": "O TTL é a validade da resposta em cache. Reduzi-lo só no dia da troca não adianta: os resolvers que já guardaram o registro com TTL longo só vão consultá-lo de novo quando ele expirar. Por isso a redução precisa acontecer com antecedência de pelo menos um TTL antigo, e o endpoint antigo deve continuar atendendo enquanto houver tráfego."
       },
       "provenance": {
         "origin": "original",
-        "author": "ai-assisted-draft"
+        "author": "ai-assisted-draft",
+        "sources": []
       },
       "review": {
         "status": "unreviewed"
@@ -528,56 +630,67 @@
     {
       "id": "net-push-updates",
       "topic": "networking",
+      "level": "mid",
+      "round": "fundamentals",
       "type": "open",
       "prompt": {
-        "en": "A dashboard must show order status changes within a few seconds. Compare short polling, long polling and WebSockets for this need."
+        "en": "A dashboard must show order status changes within a few seconds. Compare short polling, long polling and WebSockets for this need.",
+        "pt-BR": "Um painel precisa mostrar mudanças de status de pedidos em poucos segundos. Compare short polling, long polling e WebSockets para essa necessidade."
       },
       "reference": {
-        "en": "Short polling requests updates on a fixed interval: simple and friendly to caches and proxies, but it wastes requests when nothing changes and adds up to one interval of delay. Long polling keeps each request open until there is an update or a timeout, giving near-real-time delivery over plain HTTP, at the cost of many held connections and a new request after every message. WebSockets keep one bidirectional connection with little per-message overhead, which suits frequent updates, but require load balancers that support long-lived connections, heartbeats, reconnection logic and fan-out infrastructure. Server-Sent Events are a simpler one-way option over HTTP. With freshness of a few seconds and many clients, a push channel such as SSE or WebSockets usually fits; short polling can still be acceptable at small scale."
+        "en": "Short polling requests updates on a fixed interval: simple, but wasteful and delayed by up to one interval. Long polling holds each request until data or a timeout: near real-time, but many open connections. WebSockets keep one bidirectional connection with little overhead, but need heartbeats, reconnection and long-lived connection support. For few-second freshness and many clients, SSE or WebSockets fit.",
+        "pt-BR": "O short polling pede atualizações em intervalo fixo: é simples, mas desperdiça requisições e atrasa até um intervalo. O long polling mantém cada requisição aberta até haver dados ou timeout, quase em tempo real sobre HTTP, mas prende muitas conexões. WebSockets mantêm uma conexão bidirecional com pouco overhead, porém exigem suporte a conexões longas, heartbeats e reconexão. Para atualizações em poucos segundos e muitos clientes, SSE ou WebSockets costumam servir."
       },
       "checklist": [
         {
           "id": "short",
           "required": true,
           "text": {
-            "en": "Describes short polling's wasted requests and interval-bound delay."
+            "en": "Describes short polling's wasted requests and interval-bound delay.",
+            "pt-BR": "Descreve as requisições desperdiçadas do short polling e o atraso limitado pelo intervalo."
           }
         },
         {
           "id": "long",
           "required": true,
           "text": {
-            "en": "Describes long polling holding a request open until data or a timeout."
+            "en": "Describes long polling holding a request open until data or a timeout.",
+            "pt-BR": "Descreve o long polling mantendo uma requisição aberta até haver dados ou um timeout."
           }
         },
         {
           "id": "websocket",
           "required": true,
           "text": {
-            "en": "Describes WebSockets as a persistent bidirectional connection and names an operational cost."
+            "en": "Describes WebSockets as a persistent bidirectional connection and names an operational cost.",
+            "pt-BR": "Descreve WebSockets como uma conexão bidirecional persistente e cita um custo operacional."
           }
         },
         {
           "id": "sse",
           "required": false,
           "text": {
-            "en": "Mentions Server-Sent Events as a one-way alternative."
+            "en": "Mentions Server-Sent Events as a one-way alternative.",
+            "pt-BR": "Menciona Server-Sent Events como alternativa unidirecional."
           }
         },
         {
           "id": "choice",
           "required": false,
           "text": {
-            "en": "Chooses based on update frequency and number of clients."
+            "en": "Chooses based on update frequency and number of clients.",
+            "pt-BR": "Escolhe com base na frequência de atualização e no número de clientes."
           }
         }
       ],
       "explanation": {
+        "en": "The three options trade simplicity for latency and connection cost. Short polling is the simplest but pays for empty requests; long polling reduces the delay but keeps many requests open; WebSockets deliver with little overhead but require handling long-lived connections, reconnection and message distribution. For updates that only flow from server to client, SSE is usually enough.",
         "pt-BR": "As três opções trocam simplicidade por latência e custo de conexão. Short polling é a mais simples, mas paga requisições vazias; long polling reduz o atraso, mas mantém muitas requisições abertas; WebSockets entregam com pouco overhead, mas exigem cuidar de conexões longas, reconexão e distribuição de mensagens. Para atualizações que só vão do servidor ao cliente, SSE costuma bastar."
       },
       "provenance": {
         "origin": "original",
-        "author": "ai-assisted-draft"
+        "author": "ai-assisted-draft",
+        "sources": []
       },
       "review": {
         "status": "unreviewed"
@@ -586,52 +699,64 @@
     {
       "id": "net-udp-realtime",
       "topic": "networking",
+      "level": "mid",
+      "round": "fundamentals",
       "type": "multiple-choice",
       "prompt": {
-        "en": "A multiplayer game sends player positions 30 times per second. Why might it use UDP instead of TCP?"
+        "en": "A multiplayer game sends player positions 30 times per second. Why might it use UDP instead of TCP?",
+        "pt-BR": "Um jogo multiplayer envia as posições dos jogadores 30 vezes por segundo. Por que ele usaria UDP em vez de TCP?"
       },
       "choices": [
         {
           "id": "a",
           "text": {
-            "en": "UDP guarantees delivery with less overhead than TCP."
+            "en": "UDP guarantees delivery with less overhead than TCP.",
+            "pt-BR": "UDP garante a entrega com menos overhead que TCP."
           },
           "reason": {
+            "en": "UDP guarantees neither delivery nor ordering; any reliability has to be implemented by the application.",
             "pt-BR": "UDP não garante entrega nem ordem; qualquer confiabilidade precisa ser implementada pela aplicação."
           }
         },
         {
           "id": "b",
           "text": {
-            "en": "TCP cannot carry binary data."
+            "en": "TCP cannot carry binary data.",
+            "pt-BR": "TCP não consegue transportar dados binários."
           },
           "reason": {
+            "en": "TCP carries an arbitrary stream of bytes, including binary data.",
             "pt-BR": "TCP transporta um fluxo arbitrário de bytes, inclusive dados binários."
           }
         },
         {
           "id": "c",
           "text": {
-            "en": "Routers never drop UDP datagrams."
+            "en": "Routers never drop UDP datagrams.",
+            "pt-BR": "Roteadores nunca descartam datagramas UDP."
           },
           "reason": {
+            "en": "Routers drop UDP datagrams under congestion like any other packet.",
             "pt-BR": "Roteadores descartam datagramas UDP sob congestionamento como qualquer outro pacote."
           }
         },
         {
           "id": "d",
           "text": {
-            "en": "A lost update is soon superseded, and TCP would hold back newer data while it retransmits the old one."
+            "en": "Lost updates are superseded; TCP holds newer data behind retransmissions.",
+            "pt-BR": "Atualizações perdidas são substituídas; o TCP segura dados novos durante retransmissões."
           }
         }
       ],
       "answer": "d",
       "explanation": {
+        "en": "TCP delivers bytes in order: if a segment is lost, the data after it waits for the retransmission (head-of-line blocking). For real-time positions, the newest packet is worth more than the old one, so it is better to skip the loss and move on. That is why games usually use UDP and implement only the reliability they need.",
         "pt-BR": "TCP entrega bytes em ordem: se um segmento se perde, os dados seguintes esperam a retransmissão (bloqueio de cabeça de fila). Para posições em tempo real, o pacote mais novo vale mais que o antigo, então é melhor descartar a perda e seguir. Por isso jogos costumam usar UDP e implementar só a confiabilidade de que precisam."
       },
       "provenance": {
         "origin": "original",
-        "author": "ai-assisted-draft"
+        "author": "ai-assisted-draft",
+        "sources": []
       },
       "review": {
         "status": "unreviewed"
@@ -640,52 +765,64 @@
     {
       "id": "net-rate-limit-status",
       "topic": "networking",
+      "level": "mid",
+      "round": "fundamentals",
       "type": "multiple-choice",
       "prompt": {
-        "en": "A client sends a well-formed request but has exceeded its rate limit. Which status code should the API return?"
+        "en": "A client sends a well-formed request but has exceeded its rate limit. Which status code should the API return?",
+        "pt-BR": "Um cliente envia uma requisição bem formada, mas excedeu o limite de taxa. Qual código de status a API deve retornar?"
       },
       "choices": [
         {
           "id": "a",
           "text": {
-            "en": "400 Bad Request"
+            "en": "400 Bad Request",
+            "pt-BR": "400 Bad Request"
           },
           "reason": {
+            "en": "400 indicates a malformed request; here the request is valid.",
             "pt-BR": "400 indica requisição malformada; aqui a requisição é válida."
           }
         },
         {
           "id": "b",
           "text": {
-            "en": "403 Forbidden"
+            "en": "403 Forbidden",
+            "pt-BR": "403 Forbidden"
           },
           "reason": {
+            "en": "403 indicates a lack of permission for the resource and does not convey that simply waiting is enough before trying again.",
             "pt-BR": "403 indica falta de permissão para o recurso e não comunica que basta esperar para tentar de novo."
           }
         },
         {
           "id": "c",
           "text": {
-            "en": "429 Too Many Requests"
+            "en": "429 Too Many Requests",
+            "pt-BR": "429 Too Many Requests"
           }
         },
         {
           "id": "d",
           "text": {
-            "en": "503 Service Unavailable"
+            "en": "503 Service Unavailable",
+            "pt-BR": "503 Service Unavailable"
           },
           "reason": {
+            "en": "503 signals that the server is unavailable, not that a limit was applied to this client.",
             "pt-BR": "503 sinaliza que o servidor está indisponível, não que um limite foi aplicado a este cliente."
           }
         }
       ],
       "answer": "c",
       "explanation": {
+        "en": "429, defined in RFC 6585, reports that the client sent too many requests within a time window. The Retry-After header can say when to try again, which lets the client back off without treating the case as a permission error or a server failure.",
         "pt-BR": "O 429, definido na RFC 6585, informa que o cliente enviou requisições demais em um intervalo. O cabeçalho Retry-After pode dizer quando tentar novamente, o que permite ao cliente recuar sem tratar o caso como erro de permissão ou falha do servidor."
       },
       "provenance": {
         "origin": "original",
-        "author": "ai-assisted-draft"
+        "author": "ai-assisted-draft",
+        "sources": []
       },
       "review": {
         "status": "unreviewed"
@@ -694,56 +831,67 @@
     {
       "id": "db-composite-index",
       "topic": "databases",
+      "level": "mid",
+      "round": "fundamentals",
       "type": "open",
       "prompt": {
-        "en": "A frequent query filters orders by customer_id and sorts them by created_at. What index would you add, and what does it cost?"
+        "en": "A frequent query filters orders by customer_id and sorts them by created_at. What index would you add, and what does it cost?",
+        "pt-BR": "Uma consulta frequente filtra pedidos por customer_id e os ordena por created_at. Que índice você adicionaria, e qual é o custo dele?"
       },
       "reference": {
-        "en": "Add a composite B-tree index on (customer_id, created_at). The database can seek to one customer's entries and read them already ordered by created_at, avoiding a full scan and a separate sort. Column order matters: the equality-filtered column comes first, followed by the sort column. Including the selected columns (a covering index) can also avoid looking up table rows. The cost is that every insert, delete and update of indexed columns must maintain the index, which slows writes and uses storage and memory. Confirm the benefit with the query plan before and after."
+        "en": "Add a composite B-tree index on (customer_id, created_at), equality column first. The database seeks to one customer's entries and reads them already sorted, avoiding a full scan and a separate sort. The cost: every insert, delete and update of indexed columns must maintain the index, adding write time and storage. Confirm the gain with EXPLAIN before and after.",
+        "pt-BR": "Adicione um índice B-tree composto em (customer_id, created_at), com a coluna de igualdade primeiro. O banco vai direto às entradas de um cliente e as lê já ordenadas, evitando uma varredura completa e uma ordenação separada. O custo: toda inserção, exclusão e atualização de colunas indexadas precisa manter o índice, o que aumenta o tempo de escrita e o armazenamento. Confirme o ganho com o plano de execução (EXPLAIN) antes e depois."
       },
       "checklist": [
         {
           "id": "composite",
           "required": true,
           "text": {
-            "en": "Proposes a composite index with the equality column first and the sort column second."
+            "en": "Proposes a composite index with the equality column first and the sort column second.",
+            "pt-BR": "Propõe um índice composto com a coluna de igualdade primeiro e a coluna de ordenação em segundo."
           }
         },
         {
           "id": "avoids-work",
           "required": true,
           "text": {
-            "en": "Explains that the index avoids a full scan and a separate sort."
+            "en": "Explains that the index avoids a full scan and a separate sort.",
+            "pt-BR": "Explica que o índice evita uma varredura completa e uma ordenação separada."
           }
         },
         {
           "id": "write-cost",
           "required": true,
           "text": {
-            "en": "Names the write and storage cost of maintaining the index."
+            "en": "Names the write and storage cost of maintaining the index.",
+            "pt-BR": "Cita o custo de escrita e de armazenamento para manter o índice."
           }
         },
         {
           "id": "covering",
           "required": false,
           "text": {
-            "en": "Mentions a covering index to avoid table lookups."
+            "en": "Mentions a covering index to avoid table lookups.",
+            "pt-BR": "Menciona um índice de cobertura para evitar buscas na tabela."
           }
         },
         {
           "id": "verify",
           "required": false,
           "text": {
-            "en": "Verifies the effect with the query plan (EXPLAIN)."
+            "en": "Verifies the effect with the query plan (EXPLAIN).",
+            "pt-BR": "Verifica o efeito com o plano de execução (EXPLAIN)."
           }
         }
       ],
       "explanation": {
+        "en": "A B-tree index is ordered by its first column and, within it, by the second. With customer_id first, the rows of one customer are contiguous and already in created_at order, so the database reads only that range and skips the sort. In exchange, every write to the table must also update the index.",
         "pt-BR": "Um índice B-tree é ordenado pela primeira coluna e, dentro dela, pela segunda. Com customer_id primeiro, as linhas de um cliente ficam contíguas e já em ordem de created_at, então o banco lê só esse trecho e dispensa a ordenação. Em troca, cada escrita na tabela também precisa atualizar o índice."
       },
       "provenance": {
         "origin": "original",
-        "author": "ai-assisted-draft"
+        "author": "ai-assisted-draft",
+        "sources": []
       },
       "review": {
         "status": "unreviewed"
@@ -752,56 +900,67 @@
     {
       "id": "db-lost-update",
       "topic": "databases",
+      "level": "mid",
+      "round": "fundamentals",
       "type": "open",
       "prompt": {
-        "en": "Two requests read a product's stock as 1, both accept an order, and both write the stock as 0. Two orders now exist for one item. Name the anomaly and two ways to prevent it."
+        "en": "Two requests read stock as 1, both accept an order and write 0. Name the anomaly and two ways to prevent it.",
+        "pt-BR": "Duas requisições leem o estoque como 1, ambas aceitam um pedido e gravam 0. Nomeie a anomalia e duas formas de evitá-la."
       },
       "reference": {
-        "en": "This is a lost update: both transactions read the same value and write results computed from it, so one decrement disappears and the stock no longer matches the orders. Prevent it with an atomic conditional update (UPDATE products SET stock = stock - 1 WHERE id = ? AND stock > 0, then check the affected row count), with pessimistic locking (SELECT ... FOR UPDATE before deciding), with optimistic concurrency (a version column checked in the UPDATE and a retry on conflict), or with an isolation level that detects the conflict, such as SERIALIZABLE, retrying aborted transactions. The options trade lock contention, retries and latency differently."
+        "en": "This is a lost update: both transactions read the same value and write results computed from it, so one decrement vanishes. Prevent it with an atomic conditional UPDATE (WHERE stock > 0, then check the affected rows), a row lock (SELECT ... FOR UPDATE), a version column with retries, or SERIALIZABLE isolation with retries. Each trades contention, retries and latency.",
+        "pt-BR": "É uma atualização perdida (lost update): as duas transações leem o mesmo valor e gravam resultados calculados sobre ele, então um decremento desaparece. Evite com um UPDATE condicional atômico (WHERE stock > 0, verificando as linhas afetadas), um lock de linha (SELECT ... FOR UPDATE), uma coluna de versão com novas tentativas ou SERIALIZABLE com novas tentativas. Cada opção equilibra disputa por locks, novas tentativas e latência de forma diferente."
       },
       "checklist": [
         {
           "id": "anomaly",
           "required": true,
           "text": {
-            "en": "Names the anomaly as a lost update caused by read-then-write without coordination."
+            "en": "Names the anomaly as a lost update caused by read-then-write without coordination.",
+            "pt-BR": "Nomeia a anomalia como atualização perdida, causada por ler e depois escrever sem coordenação."
           }
         },
         {
           "id": "atomic",
           "required": true,
           "text": {
-            "en": "Proposes an atomic conditional UPDATE or a row lock."
+            "en": "Proposes an atomic conditional UPDATE or a row lock.",
+            "pt-BR": "Propõe um UPDATE condicional atômico ou um lock de linha."
           }
         },
         {
           "id": "second",
           "required": true,
           "text": {
-            "en": "Proposes a second distinct mechanism, such as an optimistic version check or SERIALIZABLE isolation with retries."
+            "en": "Proposes a second distinct mechanism, such as an optimistic version check or SERIALIZABLE isolation with retries.",
+            "pt-BR": "Propõe um segundo mecanismo diferente, como verificação otimista de versão ou isolamento SERIALIZABLE com novas tentativas."
           }
         },
         {
           "id": "rows",
           "required": false,
           "text": {
-            "en": "Checks the affected row count or retries on conflict."
+            "en": "Checks the affected row count or retries on conflict.",
+            "pt-BR": "Verifica o número de linhas afetadas ou tenta de novo em caso de conflito."
           }
         },
         {
           "id": "trade-off",
           "required": false,
           "text": {
-            "en": "Names a trade-off such as contention or retries."
+            "en": "Names a trade-off such as contention or retries.",
+            "pt-BR": "Cita uma contrapartida, como disputa por locks ou novas tentativas."
           }
         }
       ],
       "explanation": {
+        "en": "The problem is reading, deciding in the application and writing without the database knowing about the dependency between those steps. The conditional update moves the decision into the database in a single statement; the lock makes the second transaction wait; the optimistic version detects the conflict and asks for a retry. At the default isolation levels of common databases, such as READ COMMITTED, this read followed by a write is not protected automatically.",
         "pt-BR": "O problema é ler, decidir na aplicação e escrever sem que o banco saiba da dependência entre esses passos. A atualização condicional move a decisão para dentro do banco em um único comando; o lock faz a segunda transação esperar; a versão otimista detecta o conflito e pede nova tentativa. Nos níveis de isolamento padrão de bancos comuns, como READ COMMITTED, essa leitura seguida de escrita não é protegida automaticamente."
       },
       "provenance": {
         "origin": "original",
-        "author": "ai-assisted-draft"
+        "author": "ai-assisted-draft",
+        "sources": []
       },
       "review": {
         "status": "unreviewed"
@@ -810,56 +969,67 @@
     {
       "id": "db-replica-lag",
       "topic": "databases",
+      "level": "mid",
+      "round": "fundamentals",
       "type": "open",
       "prompt": {
-        "en": "After users edit their profile, the next page sometimes shows the old data. The app reads from asynchronous replicas. Why, and what would you do?"
+        "en": "After users edit their profile, the next page sometimes shows the old data. The app reads from asynchronous replicas. Why, and what would you do?",
+        "pt-BR": "Depois que usuários editam o perfil, a página seguinte às vezes mostra os dados antigos. O app lê de réplicas assíncronas. Por quê, e o que você faria?"
       },
       "reference": {
-        "en": "With asynchronous replication the primary acknowledges the commit before replicas apply it, so a read routed to a lagging replica returns the previous version. Provide read-your-writes consistency: route that user's reads to the primary for a short period after a write, or until a replica has applied the write's log position; pinning the user to one replica also keeps their reads from going back in time. Synchronous or semi-synchronous replication narrows the gap at the cost of write latency and availability. Monitor replication lag either way."
+        "en": "Async replicas apply commits after the primary acknowledges them, so a read on a lagging replica returns the old version. Guarantee read-your-writes: read the user's own writes from the primary for a short window, or until a replica reaches that write's log position. The fix costs primary load or write latency; monitor lag, and consider synchronous replication.",
+        "pt-BR": "Réplicas assíncronas aplicam os commits depois que o primário os confirma, então uma leitura em uma réplica atrasada devolve a versão antiga. Garanta a leitura das próprias escritas: leia do primário por um curto período após uma escrita, ou até a réplica alcançar a posição de log dela. A solução custa carga no primário ou latência de escrita; monitore o atraso e considere replicação síncrona quando esse custo for aceitável."
       },
       "checklist": [
         {
           "id": "async",
           "required": true,
           "text": {
-            "en": "Explains that asynchronous replicas apply commits after the primary acknowledges them."
+            "en": "Explains that asynchronous replicas apply commits after the primary acknowledges them.",
+            "pt-BR": "Explica que réplicas assíncronas aplicam os commits depois que o primário já os confirmou."
           }
         },
         {
           "id": "read-your-writes",
           "required": true,
           "text": {
-            "en": "Proposes read-your-writes, such as reading from the primary after a write or waiting for the replica's log position."
+            "en": "Proposes read-your-writes, such as reading from the primary after a write or waiting for the replica's log position.",
+            "pt-BR": "Propõe garantir a leitura das próprias escritas, por exemplo lendo do primário depois de uma escrita ou esperando a réplica alcançar a posição de log."
           }
         },
         {
           "id": "cost",
           "required": true,
           "text": {
-            "en": "Names the cost of the fix, such as more load on the primary or higher write latency."
+            "en": "Names the cost of the fix, such as more load on the primary or higher write latency.",
+            "pt-BR": "Cita o custo da solução, como mais carga no primário ou maior latência de escrita."
           }
         },
         {
           "id": "monitor",
           "required": false,
           "text": {
-            "en": "Mentions monitoring replication lag."
+            "en": "Mentions monitoring replication lag.",
+            "pt-BR": "Menciona o monitoramento do atraso de replicação."
           }
         },
         {
           "id": "sync",
           "required": false,
           "text": {
-            "en": "Mentions synchronous or semi-synchronous replication as an alternative."
+            "en": "Mentions synchronous or semi-synchronous replication as an alternative.",
+            "pt-BR": "Menciona replicação síncrona ou semissíncrona como alternativa."
           }
         }
       ],
       "explanation": {
+        "en": "Asynchronous replicas receive changes with a delay, so the same read can return different answers depending on which replica is chosen. Reading from the primary right after a write guarantees that users see their own change without requiring synchronous replication for the whole system.",
         "pt-BR": "Réplicas assíncronas recebem as alterações com atraso, então a mesma leitura pode ter respostas diferentes dependendo da réplica escolhida. Ler do primário logo após uma escrita garante que o usuário veja a própria alteração sem exigir replicação síncrona para todo o sistema."
       },
       "provenance": {
         "origin": "original",
-        "author": "ai-assisted-draft"
+        "author": "ai-assisted-draft",
+        "sources": []
       },
       "review": {
         "status": "unreviewed"
@@ -868,56 +1038,67 @@
     {
       "id": "db-n-plus-one",
       "topic": "databases",
+      "level": "mid",
+      "round": "fundamentals",
       "type": "open",
       "prompt": {
-        "en": "An endpoint that lists 50 orders runs 51 database queries. What is happening, and how do you fix it?"
+        "en": "An endpoint that lists 50 orders runs 51 database queries. What is happening, and how do you fix it?",
+        "pt-BR": "Um endpoint que lista 50 pedidos executa 51 consultas no banco de dados. O que está acontecendo, e como corrigir?"
       },
       "reference": {
-        "en": "This is the N+1 query problem: one query loads the orders, then the code, often an ORM's lazy loading, runs one more query per order to fetch related data such as the customer. Each query pays a round trip and execution overhead, so latency grows with the page size. Load the related data in bulk instead: a JOIN, or one extra query with WHERE id IN (...) through eager loading, then match the results in memory. A JOIN on a one-to-many relation repeats the parent columns in every row, so compare the data transferred. Catch regressions with query logs or a test that counts queries."
+        "en": "This is the N+1 pattern: one query loads the list, then lazy loading runs one query per item. Each query pays a round trip, so latency grows with page size. Batch it with a JOIN or one WHERE id IN (...) query via eager loading. JOINs repeat parent columns; detect regressions with query logs or a query-count test.",
+        "pt-BR": "É o padrão N+1: uma consulta carrega a lista e, por lazy loading, outra por item busca dados relacionados, como o cliente. Cada consulta paga uma ida e volta, então a latência cresce com o número de itens. Faça o lote com JOIN ou com WHERE id IN (...) via carregamento antecipado. JOINs repetem colunas do pai; detecte regressões com logs de consultas ou um teste que conta consultas."
       },
       "checklist": [
         {
           "id": "pattern",
           "required": true,
           "text": {
-            "en": "Identifies the N+1 pattern: one query for the list plus one per item."
+            "en": "Identifies the N+1 pattern: one query for the list plus one per item.",
+            "pt-BR": "Identifica o padrão N+1: uma consulta para a lista mais uma por item."
           }
         },
         {
           "id": "batch",
           "required": true,
           "text": {
-            "en": "Proposes batching with a JOIN, an IN query or eager loading."
+            "en": "Proposes batching with a JOIN, an IN query or eager loading.",
+            "pt-BR": "Propõe buscar em lote com um JOIN, uma consulta IN ou carregamento antecipado."
           }
         },
         {
           "id": "latency",
           "required": true,
           "text": {
-            "en": "Explains that per-query round trips make latency grow with the number of items."
+            "en": "Explains that per-query round trips make latency grow with the number of items.",
+            "pt-BR": "Explica que a ida e volta de cada consulta faz a latência crescer com o número de itens."
           }
         },
         {
           "id": "duplication",
           "required": false,
           "text": {
-            "en": "Notes the row duplication or over-fetching trade-off of JOINs."
+            "en": "Notes the row duplication or over-fetching trade-off of JOINs.",
+            "pt-BR": "Observa a contrapartida dos JOINs: linhas duplicadas ou dados buscados em excesso."
           }
         },
         {
           "id": "detect",
           "required": false,
           "text": {
-            "en": "Suggests detecting it with query logs or a query-count test."
+            "en": "Suggests detecting it with query logs or a query-count test.",
+            "pt-BR": "Sugere detectar o problema com logs de consultas ou um teste que conta consultas."
           }
         }
       ],
       "explanation": {
+        "en": "Each extra query pays for a network round trip and execution work in the database, even when it is small. With 50 items, that fixed cost repeats 50 times. Fetching the related data in bulk turns N queries into one or two, with a nearly constant cost relative to the page size.",
         "pt-BR": "Cada consulta extra paga ida e volta pela rede e trabalho de execução no banco, mesmo quando é pequena. Com 50 itens, esse custo fixo se repete 50 vezes. Buscar os dados relacionados em lote transforma N consultas em uma ou duas, com custo quase constante em relação ao tamanho da página."
       },
       "provenance": {
         "origin": "original",
-        "author": "ai-assisted-draft"
+        "author": "ai-assisted-draft",
+        "sources": []
       },
       "review": {
         "status": "unreviewed"
@@ -926,52 +1107,64 @@
     {
       "id": "db-atomicity",
       "topic": "databases",
+      "level": "mid",
+      "round": "fundamentals",
       "type": "multiple-choice",
       "prompt": {
-        "en": "A transfer debits account A and then credits account B in one transaction. The server crashes after the debit. Which ACID property ensures the debit is undone?"
+        "en": "A transfer debits A and credits B in one transaction. The server crashes after the debit. Which ACID property ensures the debit is undone?",
+        "pt-BR": "Uma transferência debita a conta A e credita a B na mesma transação. O servidor cai após o débito. Qual propriedade ACID garante que o débito seja desfeito?"
       },
       "choices": [
         {
           "id": "a",
           "text": {
-            "en": "Atomicity"
+            "en": "Atomicity",
+            "pt-BR": "Atomicidade"
           }
         },
         {
           "id": "b",
           "text": {
-            "en": "Consistency"
+            "en": "Consistency",
+            "pt-BR": "Consistência"
           },
           "reason": {
+            "en": "Consistency requires the transaction to preserve the rules of the database, such as constraints; undoing partial work is the job of atomicity.",
             "pt-BR": "Consistência exige que a transação preserve as regras do banco, como as restrições; desfazer o trabalho parcial é papel da atomicidade."
           }
         },
         {
           "id": "c",
           "text": {
-            "en": "Isolation"
+            "en": "Isolation",
+            "pt-BR": "Isolamento"
           },
           "reason": {
+            "en": "Isolation deals with interference between concurrent transactions, not with a failure in the middle of a transaction.",
             "pt-BR": "Isolamento trata da interferência entre transações concorrentes, não de uma falha no meio de uma transação."
           }
         },
         {
           "id": "d",
           "text": {
-            "en": "Durability"
+            "en": "Durability",
+            "pt-BR": "Durabilidade"
           },
           "reason": {
+            "en": "Durability guarantees that committed transactions survive failures; this transaction was never committed.",
             "pt-BR": "Durabilidade garante que transações confirmadas sobrevivam a falhas; esta transação não chegou a ser confirmada."
           }
         }
       ],
       "answer": "a",
       "explanation": {
+        "en": "Atomicity means all or nothing: either every operation in the transaction is applied, or none is. On restart, the database uses the log to discard the effects of uncommitted transactions, so the debit without its matching credit does not remain.",
         "pt-BR": "Atomicidade significa tudo ou nada: ou todas as operações da transação são aplicadas, ou nenhuma é. Ao reiniciar, o banco usa o log para descartar os efeitos de transações sem commit, então o débito sem o crédito correspondente não permanece."
       },
       "provenance": {
         "origin": "original",
-        "author": "ai-assisted-draft"
+        "author": "ai-assisted-draft",
+        "sources": []
       },
       "review": {
         "status": "unreviewed"
@@ -980,52 +1173,64 @@
     {
       "id": "db-index-prefix",
       "topic": "databases",
+      "level": "mid",
+      "round": "fundamentals",
       "type": "multiple-choice",
       "prompt": {
-        "en": "A table has a B-tree index on (last_name, first_name). Which filter can use it to seek directly to the matching entries?"
+        "en": "A table has a B-tree index on (last_name, first_name). Which filter can use it to seek directly to the matching entries?",
+        "pt-BR": "Uma tabela tem um índice B-tree em (last_name, first_name). Qual filtro consegue usá-lo para ir direto às entradas correspondentes?"
       },
       "choices": [
         {
           "id": "a",
           "text": {
-            "en": "WHERE first_name = 'Ana'"
+            "en": "WHERE first_name = 'Ana'",
+            "pt-BR": "WHERE first_name = 'Ana'"
           },
           "reason": {
+            "en": "Without a filter on the leading column, the database cannot position itself on a single range of the index; some databases use a skip scan, which only pays off when the first column has few distinct values.",
             "pt-BR": "Sem filtrar a coluna inicial, o banco não consegue se posicionar em um único trecho do índice; alguns bancos usam skip scan, que só compensa com poucos valores distintos na primeira coluna."
           }
         },
         {
           "id": "b",
           "text": {
-            "en": "WHERE lower(last_name) = 'silva'"
+            "en": "WHERE lower(last_name) = 'silva'",
+            "pt-BR": "WHERE lower(last_name) = 'silva'"
           },
           "reason": {
+            "en": "Applying a function to the column prevents the use of the plain index; it would need an expression index on lower(last_name).",
             "pt-BR": "Aplicar uma função à coluna impede o uso do índice comum; seria preciso um índice de expressão em lower(last_name)."
           }
         },
         {
           "id": "c",
           "text": {
-            "en": "WHERE last_name LIKE '%silva'"
+            "en": "WHERE last_name LIKE '%silva'",
+            "pt-BR": "WHERE last_name LIKE '%silva'"
           },
           "reason": {
+            "en": "A leading wildcard prevents a prefix search, because the index is ordered by the beginning of the value.",
             "pt-BR": "Um curinga no início impede a busca por prefixo, porque o índice está ordenado pelo começo do valor."
           }
         },
         {
           "id": "d",
           "text": {
-            "en": "WHERE last_name = 'Silva'"
+            "en": "WHERE last_name = 'Silva'",
+            "pt-BR": "WHERE last_name = 'Silva'"
           }
         }
       ],
       "answer": "d",
       "explanation": {
+        "en": "A composite index is ordered by its first column and, within it, by the second. That is why it serves searches that fix the leading column (the leftmost-prefix rule). Filters that skip that column, transform its value or start with a wildcard cannot use that ordering to go straight to the rows.",
         "pt-BR": "Um índice composto é ordenado pela primeira coluna e, dentro dela, pela segunda. Por isso ele atende buscas que fixam a coluna inicial (regra do prefixo mais à esquerda). Filtros que pulam essa coluna, transformam seu valor ou começam com curinga não conseguem usar essa ordenação para ir direto às linhas."
       },
       "provenance": {
         "origin": "original",
-        "author": "ai-assisted-draft"
+        "author": "ai-assisted-draft",
+        "sources": []
       },
       "review": {
         "status": "unreviewed"
@@ -1034,56 +1239,67 @@
     {
       "id": "algo-hash-map",
       "topic": "algorithms",
+      "level": "mid",
+      "round": "coding",
       "type": "open",
       "prompt": {
-        "en": "Why is lookup in a hash map described as O(1) on average, and when can it degrade?"
+        "en": "Why is lookup in a hash map described as O(1) on average, and when can it degrade?",
+        "pt-BR": "Por que a busca em uma tabela hash é descrita como O(1) em média, e quando ela pode se degradar?"
       },
       "reference": {
-        "en": "A hash function maps the key to a bucket index, so a lookup hashes the key and inspects one bucket. With a hash that spreads keys well and a load factor kept bounded by resizing, each bucket holds a constant expected number of entries, which gives O(1) average lookup; resizing costs O(n) occasionally, but amortized over the inserts it stays O(1) per insert. Lookup degrades when many keys collide, because of a poor hash function, adversarial input (hash flooding) or a load factor allowed to grow, up to O(n) when a bucket is a linked list. Seeded hash functions and tree-based buckets limit that worst case; Java's HashMap, for example, turns long buckets into balanced trees."
+        "en": "A hash maps each key to a bucket, which is then inspected. With a well-spread hash and a bounded load factor, kept by resizing, lookup is O(1) on average; resizing is O(n) occasionally, amortized O(1) per insert. Collisions in one bucket, from a poor hash or hash flooding, degrade lookup toward O(n); seeded hashes and tree buckets limit that.",
+        "pt-BR": "O hash leva a chave a um balde, que é então inspecionado. Com hash bem distribuído e fator de carga limitado pelo redimensionamento, a busca é O(1) em média; redimensionar custa O(n) às vezes, amortizado em O(1) por inserção. Colisões em um balde, por hash ruim ou hash flooding, levam a O(n); hashes com semente e baldes em árvore limitam esse pior caso."
       },
       "checklist": [
         {
           "id": "bucket",
           "required": true,
           "text": {
-            "en": "Explains that the key is hashed to a bucket that is then inspected."
+            "en": "Explains that the key is hashed to a bucket that is then inspected.",
+            "pt-BR": "Explica que o hash da chave aponta para um balde, que então é inspecionado."
           }
         },
         {
           "id": "load-factor",
           "required": true,
           "text": {
-            "en": "Links the O(1) average to a bounded load factor maintained by resizing."
+            "en": "Links the O(1) average to a bounded load factor maintained by resizing.",
+            "pt-BR": "Relaciona o O(1) médio a um fator de carga limitado, mantido pelo redimensionamento."
           }
         },
         {
           "id": "collisions",
           "required": true,
           "text": {
-            "en": "Names collisions as the cause of degradation toward O(n)."
+            "en": "Names collisions as the cause of degradation toward O(n).",
+            "pt-BR": "Aponta as colisões como causa da degradação em direção a O(n)."
           }
         },
         {
           "id": "amortized",
           "required": false,
           "text": {
-            "en": "Mentions that the cost of resizing is amortized."
+            "en": "Mentions that the cost of resizing is amortized.",
+            "pt-BR": "Menciona que o custo do redimensionamento é amortizado."
           }
         },
         {
           "id": "flooding",
           "required": false,
           "text": {
-            "en": "Mentions hash flooding and defenses such as seeded hashes or tree buckets."
+            "en": "Mentions hash flooding and defenses such as seeded hashes or tree buckets.",
+            "pt-BR": "Menciona hash flooding e defesas como funções de hash com semente ou baldes em árvore."
           }
         }
       ],
       "explanation": {
+        "en": "The O(1) is an average that depends on two conditions: the hash spreads keys well, and the table grows before it gets too full. If many keys land in the same bucket, the lookup becomes a scan of that bucket. That is why attacker-controlled input can degrade performance, and several languages use hash functions with a random seed.",
         "pt-BR": "O O(1) é uma média que depende de duas condições: o hash espalhar bem as chaves e a tabela crescer antes de ficar cheia demais. Se muitas chaves caem no mesmo balde, a busca vira uma varredura desse balde. Por isso entradas controladas por um atacante podem derrubar o desempenho, e várias linguagens usam funções de hash com semente aleatória."
       },
       "provenance": {
         "origin": "original",
-        "author": "ai-assisted-draft"
+        "author": "ai-assisted-draft",
+        "sources": []
       },
       "review": {
         "status": "unreviewed"
@@ -1092,56 +1308,67 @@
     {
       "id": "algo-lower-bound",
       "topic": "algorithms",
+      "level": "mid",
+      "round": "coding",
       "type": "open",
       "prompt": {
-        "en": "Explain how binary search finds the first index whose value is greater than or equal to a target in a sorted array. Which invariant prevents off-by-one errors?"
+        "en": "Explain how binary search finds the first index whose value is at least a target in a sorted array. Which invariant prevents ±1 errors?",
+        "pt-BR": "Explique como a busca binária encontra o primeiro índice cujo valor é maior ou igual a um alvo em um array ordenado. Qual invariante evita erros de ±1?"
       },
       "reference": {
-        "en": "Keep a half-open range [lo, hi) with lo = 0 and hi = n, and the invariant that every index before lo holds a value smaller than the target and every index at or after hi holds a value greater than or equal to it. While lo < hi, take mid = lo + (hi - lo) / 2; if a[mid] < target, set lo = mid + 1, otherwise set hi = mid. The range shrinks on every step, so the loop ends after O(log n) iterations, and when lo == hi that index is the answer, which is n when no element qualifies. Computing mid as lo + (hi - lo) / 2 avoids integer overflow in fixed-width languages."
+        "en": "Invariant on [lo, hi): values before lo are below the target; values from hi on are not. Test mid = lo + (hi - lo) / 2 (no overflow): if a[mid] < target, lo = mid + 1, else hi = mid. O(log n) steps: each halves the range. At lo == hi, return lo (n if none qualifies).",
+        "pt-BR": "Intervalo [lo, hi), com lo = 0 e hi = n. Invariante: valores antes de lo são menores que o alvo; a partir de hi, não são. Teste mid = lo + (hi - lo) / 2 (sem estouro): se a[mid] < alvo, lo = mid + 1; senão, hi = mid. São O(log n) passos, pois cada um corta o intervalo ao meio. Quando lo == hi, retorne lo (n se nenhum elemento atender)."
       },
       "checklist": [
         {
           "id": "invariant",
           "required": true,
           "text": {
-            "en": "States the invariant: values before lo are smaller than the target and values from hi on are not."
+            "en": "States the invariant: values before lo are smaller than the target and values from hi on are not.",
+            "pt-BR": "Enuncia o invariante: os valores antes de lo são menores que o alvo, e os valores a partir de hi não são."
           }
         },
         {
           "id": "shrink",
           "required": true,
           "text": {
-            "en": "Updates the bounds so the range always shrinks (lo = mid + 1 or hi = mid)."
+            "en": "Updates the bounds so the range always shrinks (lo = mid + 1 or hi = mid).",
+            "pt-BR": "Atualiza os limites de modo que o intervalo sempre diminua (lo = mid + 1 ou hi = mid)."
           }
         },
         {
           "id": "result",
           "required": true,
           "text": {
-            "en": "Returns lo when the range is empty, including n when no element qualifies."
+            "en": "Returns lo when the range is empty, including n when no element qualifies.",
+            "pt-BR": "Retorna lo quando o intervalo fica vazio, inclusive n quando nenhum elemento atende à condição."
           }
         },
         {
           "id": "complexity",
           "required": false,
           "text": {
-            "en": "States O(log n) time."
+            "en": "States O(log n) time.",
+            "pt-BR": "Afirma que o tempo é O(log n)."
           }
         },
         {
           "id": "overflow",
           "required": false,
           "text": {
-            "en": "Computes mid without integer overflow."
+            "en": "Computes mid without integer overflow.",
+            "pt-BR": "Calcula mid sem estouro de inteiro."
           }
         }
       ],
       "explanation": {
+        "en": "The invariant states what is already known about each side of the range, and each comparison discards half without breaking that guarantee. When the range becomes empty, lo is exactly the boundary between the values smaller than the target and the rest. Off-by-one errors appear when the bounds are updated without respecting the invariant, for example with hi = mid - 1 in a half-open range.",
         "pt-BR": "O invariante diz o que já se sabe sobre cada lado do intervalo, e cada comparação descarta metade sem violar essa garantia. Quando o intervalo fica vazio, lo é exatamente a fronteira entre os valores menores que o alvo e os demais. Erros de ±1 aparecem quando os limites são atualizados sem respeitar o invariante, por exemplo com hi = mid - 1 em um intervalo semiaberto."
       },
       "provenance": {
         "origin": "original",
-        "author": "ai-assisted-draft"
+        "author": "ai-assisted-draft",
+        "sources": []
       },
       "review": {
         "status": "unreviewed"
@@ -1150,56 +1377,67 @@
     {
       "id": "algo-bfs-shortest",
       "topic": "algorithms",
+      "level": "mid",
+      "round": "coding",
       "type": "open",
       "prompt": {
-        "en": "You need the minimum number of moves between two states in an unweighted graph. Why choose BFS over DFS, and what does BFS cost?"
+        "en": "You need the minimum number of moves between two states in an unweighted graph. Why choose BFS over DFS, and what does BFS cost?",
+        "pt-BR": "Você precisa do número mínimo de movimentos entre dois estados em um grafo sem pesos. Por que escolher BFS em vez de DFS, e quanto custa a BFS?"
       },
       "reference": {
-        "en": "BFS visits nodes in order of their distance from the start, so the first time it reaches the target it has used the fewest edges. DFS may reach the target first through a long path and would have to keep exploring to prove that no shorter path exists. BFS runs in O(V + E) time, needs a visited set so states are not processed twice, and keeps the whole frontier in memory, which can approach O(V). With weighted edges, use Dijkstra's algorithm instead; when both endpoints are known, bidirectional BFS usually explores far fewer states."
+        "en": "BFS explores by increasing distance, so its first arrival at the target uses the fewest edges. DFS may reach the target by a long path first and cannot show a shorter one without more search. BFS runs in O(V + E) with a visited set but keeps the whole frontier in memory, up to O(V). For weighted edges, use Dijkstra.",
+        "pt-BR": "A BFS explora por distância crescente, então a primeira chegada ao alvo usa o menor número de arestas. A DFS pode chegar ao alvo por um caminho longo e não prova que existe um mais curto sem explorar mais. A BFS roda em O(V + E) com um conjunto de visitados, mas guarda a fronteira inteira na memória, até O(V). Para arestas com peso, use Dijkstra."
       },
       "checklist": [
         {
           "id": "order",
           "required": true,
           "text": {
-            "en": "Explains that BFS explores by increasing distance, so the first arrival is a shortest path."
+            "en": "Explains that BFS explores by increasing distance, so the first arrival is a shortest path.",
+            "pt-BR": "Explica que a BFS explora por distância crescente, então a primeira chegada ao alvo é por um caminho mais curto."
           }
         },
         {
           "id": "dfs",
           "required": true,
           "text": {
-            "en": "Explains why DFS does not guarantee the shortest path."
+            "en": "Explains why DFS does not guarantee the shortest path.",
+            "pt-BR": "Explica por que a DFS não garante o caminho mais curto."
           }
         },
         {
           "id": "memory",
           "required": true,
           "text": {
-            "en": "Names BFS's memory cost for the frontier and the need for a visited set."
+            "en": "Names BFS's memory cost for the frontier and the need for a visited set.",
+            "pt-BR": "Cita o custo de memória da fronteira da BFS e a necessidade de um conjunto de visitados."
           }
         },
         {
           "id": "complexity",
           "required": false,
           "text": {
-            "en": "States O(V + E) time."
+            "en": "States O(V + E) time.",
+            "pt-BR": "Afirma que o tempo é O(V + E)."
           }
         },
         {
           "id": "variants",
           "required": false,
           "text": {
-            "en": "Mentions Dijkstra for weighted graphs or bidirectional BFS."
+            "en": "Mentions Dijkstra for weighted graphs or bidirectional BFS.",
+            "pt-BR": "Menciona Dijkstra para grafos ponderados ou a BFS bidirecional."
           }
         }
       ],
       "explanation": {
+        "en": "BFS processes every state one move away, then every state two moves away, and so on. That is why the first time it finds the target, it has already done so with the fewest edges. DFS follows a path to the end before backtracking, so it may find a long route first. The price of BFS is keeping the whole frontier in memory.",
         "pt-BR": "A BFS processa todos os estados a um movimento de distância, depois todos a dois movimentos, e assim por diante. Por isso, a primeira vez que encontra o alvo já é pelo menor número de arestas. A DFS segue um caminho até o fim antes de voltar, então pode achar primeiro uma rota longa. O preço da BFS é guardar a fronteira inteira na memória."
       },
       "provenance": {
         "origin": "original",
-        "author": "ai-assisted-draft"
+        "author": "ai-assisted-draft",
+        "sources": []
       },
       "review": {
         "status": "unreviewed"
@@ -1208,56 +1446,67 @@
     {
       "id": "algo-top-k",
       "topic": "algorithms",
+      "level": "mid",
+      "round": "coding",
       "type": "open",
       "prompt": {
-        "en": "Return the k most frequent words from a list of n words. Describe an approach and its complexity."
+        "en": "Return the k most frequent words from a list of n words. Describe an approach and its complexity.",
+        "pt-BR": "Retorne as k palavras mais frequentes de uma lista de n palavras. Descreva uma abordagem e sua complexidade."
       },
       "reference": {
-        "en": "Count frequencies with a hash map in O(n) time. Then keep a min-heap of at most k entries ordered by count: push each distinct word and pop the smallest whenever the heap grows past k. For m distinct words this costs O(m log k) time and O(k) extra memory, cheaper than sorting all m words in O(m log m) when k is small. Bucketing words by count gives O(n + m) at the cost of an array indexed by frequency. If the data is too large to count exactly, approximate counts such as a Count-Min Sketch combined with a heap trade accuracy for memory."
+        "en": "Count frequencies with a hash map in O(n). Keep the top k in a size-k min-heap, evicting the smallest when it exceeds k: O(m log k) for m distinct words, with O(k) extra memory, versus O(m log m) to sort all. If exact counts do not fit in memory, use approximate counting such as Count-Min Sketch.",
+        "pt-BR": "Conte as frequências com uma tabela hash em O(n). Mantenha os k maiores em um heap mínimo de tamanho k, removendo o menor ao passar de k: O(m log k) para m palavras distintas, com memória extra O(k), em vez de O(m log m) ordenando tudo. Agrupar por contagem dá O(n + m). Se as contagens exatas não couberem na memória, use contagem aproximada, como Count-Min Sketch."
       },
       "checklist": [
         {
           "id": "count",
           "required": true,
           "text": {
-            "en": "Counts frequencies with a hash map."
+            "en": "Counts frequencies with a hash map.",
+            "pt-BR": "Conta as frequências com uma tabela hash."
           }
         },
         {
           "id": "heap",
           "required": true,
           "text": {
-            "en": "Keeps the top k with a size-k min-heap or an equivalent selection."
+            "en": "Keeps the top k with a size-k min-heap or an equivalent selection.",
+            "pt-BR": "Mantém os k maiores com um heap mínimo de tamanho k ou uma seleção equivalente."
           }
         },
         {
           "id": "complexity",
           "required": true,
           "text": {
-            "en": "States the complexity, for example O(n + m log k)."
+            "en": "States the complexity, for example O(n + m log k).",
+            "pt-BR": "Informa a complexidade, por exemplo O(n + m log k)."
           }
         },
         {
           "id": "alternatives",
           "required": false,
           "text": {
-            "en": "Compares with sorting all distinct words or bucketing by frequency."
+            "en": "Compares with sorting all distinct words or bucketing by frequency.",
+            "pt-BR": "Compara com ordenar todas as palavras distintas ou agrupá-las em baldes por frequência."
           }
         },
         {
           "id": "approximate",
           "required": false,
           "text": {
-            "en": "Mentions approximate counting when exact counts do not fit in memory."
+            "en": "Mentions approximate counting when exact counts do not fit in memory.",
+            "pt-BR": "Menciona contagem aproximada quando as contagens exatas não cabem na memória."
           }
         }
       ],
       "explanation": {
+        "en": "Counting is linear and unavoidable. The interesting question is how to select the k largest: sorting everything works, but costs O(m log m). A min-heap of size k always discards the smallest candidate, so each operation costs O(log k). When k is small relative to m, the difference is large.",
         "pt-BR": "Contar é linear e inevitável. A pergunta interessante é como selecionar os k maiores: ordenar tudo resolve, mas custa O(m log m). Um heap mínimo de tamanho k descarta sempre o menor candidato, então cada operação custa O(log k). Quando k é pequeno em relação a m, a diferença é grande."
       },
       "provenance": {
         "origin": "original",
-        "author": "ai-assisted-draft"
+        "author": "ai-assisted-draft",
+        "sources": []
       },
       "review": {
         "status": "unreviewed"
@@ -1266,52 +1515,64 @@
     {
       "id": "algo-quicksort-pivot",
       "topic": "algorithms",
+      "level": "mid",
+      "round": "coding",
       "type": "multiple-choice",
       "prompt": {
-        "en": "A quicksort always picks the first element as the pivot. Which input makes it run in O(n²) time?"
+        "en": "A quicksort always picks the first element as the pivot. Which input makes it run in O(n²) time?",
+        "pt-BR": "Um quicksort sempre escolhe o primeiro elemento como pivô. Qual entrada faz com que ele rode em tempo O(n²)?"
       },
       "choices": [
         {
           "id": "a",
           "text": {
-            "en": "An array that is already sorted"
+            "en": "An array that is already sorted",
+            "pt-BR": "Um array que já está ordenado"
           }
         },
         {
           "id": "b",
           "text": {
-            "en": "An array of distinct values in random order"
+            "en": "An array of distinct values in random order",
+            "pt-BR": "Um array de valores distintos em ordem aleatória"
           },
           "reason": {
+            "en": "In random order, the partitions tend to be balanced and the expected time is O(n log n).",
             "pt-BR": "Em ordem aleatória, as partições tendem a ser equilibradas e o tempo esperado é O(n log n)."
           }
         },
         {
           "id": "c",
           "text": {
-            "en": "An array whose length is a power of two"
+            "en": "An array whose length is a power of two",
+            "pt-BR": "Um array cujo tamanho é uma potência de dois"
           },
           "reason": {
+            "en": "The size of the array does not affect the choice of pivot or the balance of the partitions.",
             "pt-BR": "O tamanho do array não influencia a escolha do pivô nem o equilíbrio das partições."
           }
         },
         {
           "id": "d",
           "text": {
-            "en": "An array small enough to fit in the CPU cache"
+            "en": "An array small enough to fit in the CPU cache",
+            "pt-BR": "Um array pequeno o bastante para caber no cache da CPU"
           },
           "reason": {
+            "en": "The cache affects the constant factors of performance, not the asymptotic complexity.",
             "pt-BR": "O cache afeta as constantes de desempenho, não a complexidade assintótica."
           }
         }
       ],
       "answer": "a",
       "explanation": {
+        "en": "With the first element as the pivot, an already sorted array produces partitions of size 0 and n − 1 at every step, adding up to n + (n − 1) + ... ≈ n²/2 comparisons. Choosing the pivot at random or by median of three makes this case unlikely.",
         "pt-BR": "Com o primeiro elemento como pivô, um array já ordenado produz partições de tamanho 0 e n − 1 em cada passo, somando n + (n − 1) + ... ≈ n²/2 comparações. Escolher o pivô aleatoriamente ou pela mediana de três torna esse caso improvável."
       },
       "provenance": {
         "origin": "original",
-        "author": "ai-assisted-draft"
+        "author": "ai-assisted-draft",
+        "sources": []
       },
       "review": {
         "status": "unreviewed"
@@ -1320,52 +1581,64 @@
     {
       "id": "algo-nested-search",
       "topic": "algorithms",
+      "level": "mid",
+      "round": "coding",
       "type": "multiple-choice",
       "prompt": {
-        "en": "A function loops over n items and, for each one, runs a binary search over a sorted array of n elements. What is its time complexity?"
+        "en": "A function loops over n items and, for each, runs a binary search on a sorted array of n elements. What is its time complexity?",
+        "pt-BR": "Uma função percorre n itens e, para cada um, executa uma busca binária em um array ordenado de n elementos. Qual é a complexidade de tempo dela?"
       },
       "choices": [
         {
           "id": "a",
           "text": {
-            "en": "O(n)"
+            "en": "O(n)",
+            "pt-BR": "O(n)"
           },
           "reason": {
+            "en": "That would treat binary search as O(1); each search costs O(log n).",
             "pt-BR": "Isso trataria a busca binária como O(1); cada busca custa O(log n)."
           }
         },
         {
           "id": "b",
           "text": {
-            "en": "O(n log n)"
+            "en": "O(n log n)",
+            "pt-BR": "O(n log n)"
           }
         },
         {
           "id": "c",
           "text": {
-            "en": "O(n²)"
+            "en": "O(n²)",
+            "pt-BR": "O(n²)"
           },
           "reason": {
+            "en": "That would be the case with a linear search inside the loop; binary search costs O(log n).",
             "pt-BR": "Seria o caso com busca linear dentro do laço; a busca binária custa O(log n)."
           }
         },
         {
           "id": "d",
           "text": {
-            "en": "O(log n)"
+            "en": "O(log n)",
+            "pt-BR": "O(log n)"
           },
           "reason": {
+            "en": "It ignores the outer loop, which runs n times.",
             "pt-BR": "Ignora o laço externo, que executa n vezes."
           }
         }
       ],
       "answer": "b",
       "explanation": {
+        "en": "There are n iterations, and each one performs a binary search costing O(log n). Multiplying them, the total is O(n log n).",
         "pt-BR": "São n iterações, e cada uma faz uma busca binária de custo O(log n). Multiplicando, o total é O(n log n)."
       },
       "provenance": {
         "origin": "original",
-        "author": "ai-assisted-draft"
+        "author": "ai-assisted-draft",
+        "sources": []
       },
       "review": {
         "status": "unreviewed"

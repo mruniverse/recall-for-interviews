@@ -23,6 +23,22 @@ async function onToday(phone, { newCardLimit = 5, ...options } = {}) {
   return app;
 }
 
+// Test doubles for a deck that lacks Portuguese. The schema-v2 fixtures carry both locales, so a
+// double that returns a card unchanged for pt-BR would render it instead of refusing. Copies only:
+// the shared fixture deck is never mutated.
+const englishOnly = (card, locale) => {
+  if (locale === 'en') return localizeFixtureCard(card, 'en');
+  const copy = structuredClone(card);
+  delete copy.prompt['pt-BR'];
+  return copy;
+};
+const withoutPrompts = (card) => {
+  const copy = structuredClone(card);
+  delete copy.prompt.en;
+  delete copy.prompt['pt-BR'];
+  return copy;
+};
+
 const storedLimit = (phone) => rows(phone.file, 'SELECT new_card_limit FROM study_preference');
 
 const attemptCount = (phone) => rows(phone.file, 'SELECT count(*) AS n FROM review_attempt')[0].n;
@@ -99,8 +115,6 @@ test('selecting the current language retries a failed preference write and survi
 });
 
 test('a language the deck cannot fully render is refused instead of mixing languages', async (t) => {
-  // Returns fixture cards untouched for pt-BR: their prompts exist only in English.
-  const englishOnly = (card, locale) => (locale === 'en' ? localizeFixtureCard(card, 'en') : card);
   const { study, state } = await onToday(device(t), { localize: englishOnly });
   await study.chooseLocale('pt-BR');
   assert.deepEqual([state().locale, state().notice], ['en', 'locale-unavailable']);
@@ -115,7 +129,6 @@ test('a language the deck cannot fully render is refused instead of mixing langu
 
 test('recovering from unavailable content reports a language preference that could not be saved', async (t) => {
   const preferences = memoryPreferences({ [LOCALE_KEY]: 'pt-BR' });
-  const englishOnly = (card, locale) => (locale === 'en' ? localizeFixtureCard(card, 'en') : card);
   const phone = device(t, { preferences });
   const { study, state } = await phone.launch({ localize: englishOnly });
   assert.equal(state().screen, 'unavailable');
@@ -128,7 +141,7 @@ test('recovering from unavailable content reports a language preference that cou
 
 test('unavailable content does not persist another language whose content is also unavailable', async (t) => {
   const preferences = memoryPreferences({ [LOCALE_KEY]: 'pt-BR' });
-  const { study, state } = await device(t, { preferences }).launch({ localize: (card) => card });
+  const { study, state } = await device(t, { preferences }).launch({ localize: withoutPrompts });
   assert.deepEqual(state(), { screen: 'unavailable', locale: 'pt-BR', problem: 'content' });
 
   await study.chooseLocale('en');
